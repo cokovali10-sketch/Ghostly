@@ -1,0 +1,118 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ghostly-analytics"
+version = "1.0.0"
+description = "Privacy-first web analytics platform. No cookies, no tracking, just truth."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Ghostly Contributors", email = "ghostly@example.com" },
+]
+keywords = ["analytics", "privacy", "gdpr", "compliance", "self-hosted", "open-source"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Security",
+    "Typing :: Typed",
+]
+dependencies = [
+    "aiohttp>=3.9.0",
+    "aiosqlite>=0.19.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+    "pre-commit>=3.0.0",
+]
+build = [
+    "pyinstaller>=6.0.0",
+    "build>=1.0.0",
+    "twine>=4.0.0",
+]
+
+[project.scripts]
+ghostly = "ghostly.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/yourusername/ghostly"
+Documentation = "https://github.com/yourusername/ghostly#readme"
+Repository = "https://github.com/yourusername/ghostly"
+Issues = "https://github.com/yourusername/ghostly/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ghostly"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "A",    # flake8-builtins
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+    "TCH",  # flake8-type-checking
+    "RUF",  # ruff-specific
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ghostly"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests requiring running server",
+]
+
+[tool.coverage.run]
+source = ["ghostly"]
+branch = true
+omit = [
+    "tests/*",
+    "scripts/*",
+]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = true
+fail_under = 80
