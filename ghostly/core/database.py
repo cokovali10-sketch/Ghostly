@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -45,6 +46,58 @@ class Database:
 
     async def init_db(self) -> None:
         await self.db.executescript("""
+            CREATE TABLE IF NOT EXISTS users (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                email         TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                role          TEXT NOT NULL DEFAULT 'viewer',
+                is_active     INTEGER NOT NULL DEFAULT 1,
+                failed_attempts INTEGER NOT NULL DEFAULT 0,
+                locked_until  TEXT,
+                created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+                last_login    TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                id         TEXT PRIMARY KEY,
+                user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                token      TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                action    TEXT NOT NULL,
+                resource  TEXT NOT NULL DEFAULT '',
+                details   TEXT NOT NULL DEFAULT '{}',
+                ip        TEXT NOT NULL DEFAULT '',
+                timestamp TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS user_api_keys (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                name       TEXT NOT NULL DEFAULT '',
+                key_hash   TEXT NOT NULL UNIQUE,
+                permissions TEXT NOT NULL DEFAULT '["read"]',
+                rate_limit INTEGER NOT NULL DEFAULT 1000,
+                is_active  INTEGER NOT NULL DEFAULT 1,
+                last_used  TEXT,
+                expires_at TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS password_resets (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                token_hash TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                used       INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
             CREATE TABLE IF NOT EXISTS sites (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 domain      TEXT NOT NULL UNIQUE,
@@ -83,7 +136,7 @@ class Database:
                 visits      INTEGER NOT NULL DEFAULT 1
             );
 
-            CREATE TABLE IF NOT EXISTS sessions (
+            CREATE TABLE IF NOT EXISTS analytics_sessions (
                 id          TEXT PRIMARY KEY,
                 site_id     INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
                 visitor_id  TEXT NOT NULL,
@@ -253,13 +306,22 @@ class Database:
                 created_at  TEXT NOT NULL DEFAULT (datetime('now'))
             );
 
+            CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+            CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
+            CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(token);
+            CREATE INDEX IF NOT EXISTS idx_audit_log_user_id ON audit_log(user_id);
+            CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp);
+            CREATE INDEX IF NOT EXISTS idx_user_api_keys_user_id ON user_api_keys(user_id);
+            CREATE INDEX IF NOT EXISTS idx_user_api_keys_key_hash ON user_api_keys(key_hash);
+            CREATE INDEX IF NOT EXISTS idx_password_resets_user_id ON password_resets(user_id);
+            CREATE INDEX IF NOT EXISTS idx_password_resets_token ON password_resets(token_hash);
             CREATE INDEX IF NOT EXISTS idx_pageviews_site_id ON pageviews(site_id);
             CREATE INDEX IF NOT EXISTS idx_pageviews_created_at ON pageviews(created_at);
             CREATE INDEX IF NOT EXISTS idx_pageviews_path ON pageviews(path);
             CREATE INDEX IF NOT EXISTS idx_pageviews_visitor_id ON pageviews(visitor_id);
             CREATE INDEX IF NOT EXISTS idx_visitors_site_id ON visitors(site_id);
-            CREATE INDEX IF NOT EXISTS idx_sessions_site_id ON sessions(site_id);
-            CREATE INDEX IF NOT EXISTS idx_sessions_visitor_id ON sessions(visitor_id);
+            CREATE INDEX IF NOT EXISTS idx_analytics_sessions_site_id ON analytics_sessions(site_id);
+            CREATE INDEX IF NOT EXISTS idx_analytics_sessions_visitor_id ON analytics_sessions(visitor_id);
             CREATE INDEX IF NOT EXISTS idx_events_site_id ON events(site_id);
             CREATE INDEX IF NOT EXISTS idx_events_name ON events(name);
             CREATE INDEX IF NOT EXISTS idx_referrers_site_id ON referrers(site_id);
@@ -458,6 +520,232 @@ class Database:
         await self.db.commit()
         return cursor.lastrowid or 0
 
+    # ── Users CRUD ────────────────────────────────────────────────────────
+
+    async def create_user(
+        self,
+        email: str,
+        password_hash: str,
+        role: str = "viewer",
+    ) -> int:
+        cursor = await self.db.execute(
+            "INSERT INTO users (email, password_hash, role) VALUES (?, ?, ?)",
+            (email, password_hash, role),
+        )
+        await self.db.commit()
+        return cursor.lastrowid or 0
+
+    async def get_user_by_email(self, email: str) -> dict[str, Any] | None:
+        return await self._fetch_one(
+            "SELECT id, email, password_hash, role, is_active, failed_attempts, locked_until, created_at, last_login FROM users WHERE email=?",
+            (email,),
+        )
+
+    async def get_user_by_id(self, user_id: int) -> dict[str, Any] | None:
+        return await self._fetch_one(
+            "SELECT id, email, role, is_active, created_at, last_login FROM users WHERE id=?",
+            (user_id,),
+        )
+
+    async def get_user_full(self, user_id: int) -> dict[str, Any] | None:
+        return await self._fetch_one(
+            "SELECT id, email, password_hash, role, is_active, failed_attempts, locked_until, created_at, last_login FROM users WHERE id=?",
+            (user_id,),
+        )
+
+    async def get_all_users(self) -> list[dict[str, Any]]:
+        return await self._fetch_all(
+            "SELECT id, email, role, is_active, created_at, last_login FROM users ORDER BY created_at DESC"
+        )
+
+    async def update_user(self, user_id: int, **kwargs: Any) -> bool:
+        allowed = {"email", "password_hash", "role", "is_active", "failed_attempts", "locked_until", "last_login"}
+        updates = {k: v for k, v in kwargs.items() if k in allowed}
+        if not updates:
+            return False
+        set_clause = ", ".join(f"{k}=?" for k in updates)
+        values = list(updates.values()) + [user_id]
+        await self.db.execute(f"UPDATE users SET {set_clause} WHERE id=?", values)
+        await self.db.commit()
+        return True
+
+    async def delete_user(self, user_id: int) -> bool:
+        result = await self.db.execute("DELETE FROM users WHERE id=?", (user_id,))
+        await self.db.commit()
+        return result.rowcount > 0
+
+    # ── User Sessions CRUD ────────────────────────────────────────────────
+
+    async def create_user_session(
+        self,
+        session_id: str,
+        user_id: int,
+        token: str,
+        expires_at: str,
+    ) -> int:
+        cursor = await self.db.execute(
+            "INSERT INTO user_sessions (id, user_id, token, expires_at) VALUES (?, ?, ?, ?)",
+            (session_id, user_id, token, expires_at),
+        )
+        await self.db.commit()
+        return cursor.lastrowid or 0
+
+    async def get_user_session(self, session_id: str) -> dict[str, Any] | None:
+        return await self._fetch_one(
+            "SELECT id, user_id, token, expires_at, created_at FROM user_sessions WHERE id=?",
+            (session_id,),
+        )
+
+    async def get_user_sessions(self, user_id: int) -> list[dict[str, Any]]:
+        return await self._fetch_all(
+            "SELECT id, user_id, expires_at, created_at FROM user_sessions WHERE user_id=? ORDER BY created_at DESC",
+            (user_id,),
+        )
+
+    async def delete_user_session(self, session_id: str) -> bool:
+        result = await self.db.execute("DELETE FROM user_sessions WHERE id=?", (session_id,))
+        await self.db.commit()
+        return result.rowcount > 0
+
+    async def delete_user_sessions(self, user_id: int) -> int:
+        result = await self.db.execute("DELETE FROM user_sessions WHERE user_id=?", (user_id,))
+        await self.db.commit()
+        return result.rowcount
+
+    async def cleanup_expired_sessions(self) -> int:
+        now = datetime.now(timezone.utc).isoformat()
+        result = await self.db.execute(
+            "DELETE FROM user_sessions WHERE expires_at < ?", (now,)
+        )
+        await self.db.commit()
+        return result.rowcount
+
+    # ── Audit Log ─────────────────────────────────────────────────────────
+
+    async def log_audit(
+        self,
+        user_id: int | None,
+        action: str,
+        resource: str = "",
+        details: dict[str, Any] | None = None,
+        ip: str = "",
+    ) -> int:
+        cursor = await self.db.execute(
+            "INSERT INTO audit_log (user_id, action, resource, details, ip) VALUES (?, ?, ?, ?, ?)",
+            (user_id, action, resource, json.dumps(details or {}), ip),
+        )
+        await self.db.commit()
+        return cursor.lastrowid or 0
+
+    async def get_audit_log(
+        self,
+        user_id: int | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        if user_id is not None:
+            return await self._fetch_all(
+                """SELECT al.id, al.user_id, u.email as user_email, al.action, al.resource,
+                          al.details, al.ip, al.timestamp
+                   FROM audit_log al LEFT JOIN users u ON al.user_id = u.id
+                   WHERE al.user_id=? ORDER BY al.timestamp DESC LIMIT ? OFFSET ?""",
+                (user_id, limit, offset),
+            )
+        return await self._fetch_all(
+            """SELECT al.id, al.user_id, u.email as user_email, al.action, al.resource,
+                      al.details, al.ip, al.timestamp
+               FROM audit_log al LEFT JOIN users u ON al.user_id = u.id
+               ORDER BY al.timestamp DESC LIMIT ? OFFSET ?""",
+            (limit, offset),
+        )
+
+    # ── User API Keys CRUD ────────────────────────────────────────────────
+
+    async def create_user_api_key(
+        self,
+        user_id: int,
+        name: str,
+        key_hash: str,
+        permissions: str = '["read"]',
+        rate_limit: int = 1000,
+        expires_at: str | None = None,
+    ) -> int:
+        cursor = await self.db.execute(
+            """INSERT INTO user_api_keys (user_id, name, key_hash, permissions, rate_limit, expires_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (user_id, name, key_hash, permissions, rate_limit, expires_at),
+        )
+        await self.db.commit()
+        return cursor.lastrowid or 0
+
+    async def get_user_api_keys(self, user_id: int) -> list[dict[str, Any]]:
+        return await self._fetch_all(
+            """SELECT id, user_id, name, permissions, rate_limit, is_active,
+                      last_used, expires_at, created_at
+               FROM user_api_keys WHERE user_id=? ORDER BY created_at DESC""",
+            (user_id,),
+        )
+
+    async def get_user_api_key_by_hash(self, key_hash: str) -> dict[str, Any] | None:
+        return await self._fetch_one(
+            """SELECT id, user_id, name, permissions, rate_limit, is_active,
+                      last_used, expires_at, created_at
+               FROM user_api_keys WHERE key_hash=?""",
+            (key_hash,),
+        )
+
+    async def get_user_api_key(self, key_id: int) -> dict[str, Any] | None:
+        return await self._fetch_one(
+            """SELECT id, user_id, name, permissions, rate_limit, is_active,
+                      last_used, expires_at, created_at
+               FROM user_api_keys WHERE id=?""",
+            (key_id,),
+        )
+
+    async def delete_user_api_key(self, key_id: int) -> bool:
+        result = await self.db.execute("DELETE FROM user_api_keys WHERE id=?", (key_id,))
+        await self.db.commit()
+        return result.rowcount > 0
+
+    async def update_user_api_key_last_used(self, key_hash: str) -> None:
+        await self.db.execute(
+            "UPDATE user_api_keys SET last_used=datetime('now') WHERE key_hash=?",
+            (key_hash,),
+        )
+        await self.db.commit()
+
+    # ── Password Resets ───────────────────────────────────────────────────
+
+    async def create_password_reset(
+        self,
+        user_id: int,
+        token_hash: str,
+        expires_at: str,
+    ) -> int:
+        await self.db.execute(
+            "UPDATE password_resets SET used=1 WHERE user_id=? AND used=0",
+            (user_id,),
+        )
+        cursor = await self.db.execute(
+            "INSERT INTO password_resets (user_id, token_hash, expires_at) VALUES (?, ?, ?)",
+            (user_id, token_hash, expires_at),
+        )
+        await self.db.commit()
+        return cursor.lastrowid or 0
+
+    async def get_password_reset(self, token_hash: str) -> dict[str, Any] | None:
+        return await self._fetch_one(
+            "SELECT id, user_id, token_hash, expires_at, used, created_at FROM password_resets WHERE token_hash=? AND used=0",
+            (token_hash,),
+        )
+
+    async def use_password_reset(self, reset_id: int) -> bool:
+        await self.db.execute(
+            "UPDATE password_resets SET used=1 WHERE id=?", (reset_id,)
+        )
+        await self.db.commit()
+        return True
+
     # ── query helpers ────────────────────────────────────────────────────
 
     async def _fetch_all(self, sql: str, params: tuple = ()) -> list[dict[str, Any]]:
@@ -471,6 +759,22 @@ class Database:
         return dict(row) if row else None
 
     # ── stats ────────────────────────────────────────────────────────────
+
+    async def get_system_stats(self) -> dict[str, Any]:
+        users = await self._fetch_one("SELECT COUNT(*) as total FROM users")
+        active_users = await self._fetch_one("SELECT COUNT(*) as total FROM users WHERE is_active=1")
+        sites = await self._fetch_one("SELECT COUNT(*) as total FROM sites")
+        total_pageviews = await self._fetch_one("SELECT COUNT(*) as total FROM pageviews")
+        api_keys = await self._fetch_one("SELECT COUNT(*) as total FROM user_api_keys WHERE is_active=1")
+        sessions = await self._fetch_one("SELECT COUNT(*) as total FROM user_sessions")
+        return {
+            "total_users": users["total"] if users else 0,
+            "active_users": active_users["total"] if active_users else 0,
+            "total_sites": sites["total"] if sites else 0,
+            "total_pageviews": total_pageviews["total"] if total_pageviews else 0,
+            "active_api_keys": api_keys["total"] if api_keys else 0,
+            "active_sessions": sessions["total"] if sessions else 0,
+        }
 
     async def get_site_stats(self, site_id: int, days: int = 30) -> dict[str, Any]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
@@ -488,12 +792,12 @@ class Database:
         )
         avg_time = await self._fetch_one(
             """SELECT AVG(julianday(ended_at) - julianday(started_at)) * 86400 AS avg_seconds
-               FROM sessions WHERE site_id=? AND ended_at IS NOT NULL AND started_at>=?""",
+               FROM analytics_sessions WHERE site_id=? AND ended_at IS NOT NULL AND started_at>=?""",
             (site_id, since),
         )
         bounce = await self._fetch_one(
             """SELECT COUNT(*) AS bounced
-               FROM sessions WHERE site_id=? AND page_count = 1 AND started_at>=?""",
+               FROM analytics_sessions WHERE site_id=? AND page_count = 1 AND started_at>=?""",
             (site_id, since),
         )
         total_sessions = sessions["total_sessions"] if sessions else 0

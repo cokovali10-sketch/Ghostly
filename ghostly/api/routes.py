@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import logging
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlparse
 
@@ -13,7 +14,7 @@ from aiohttp import web
 
 from ghostly.core.ab_test import ABTestManager
 from ghostly.core.alerts import AlertManager
-from ghostly.core.auth import AuthManager
+from ghostly.core.auth import AuthManager, AuthError
 from ghostly.core.database import Database
 from ghostly.core.export import ExportManager
 from ghostly.core.funnels import FunnelManager
@@ -39,6 +40,20 @@ def _get_db(request: web.Request) -> Database:
     if db is None:
         raise web.HTTPInternalServerError(reason="Database not initialised")
     return db
+
+
+def _get_auth(request: web.Request) -> AuthManager:
+    auth = request.app.get("auth")
+    if auth is None:
+        raise web.HTTPInternalServerError(reason="Auth manager not initialised")
+    return auth
+
+
+def _get_user(request: web.Request) -> dict[str, Any]:
+    user = request.get("user")
+    if user is None:
+        raise web.HTTPUnauthorized(reason="Authentication required")
+    return user
 
 
 def _parse_days(request: web.Request, default: int = 30) -> int:
@@ -75,7 +90,418 @@ def _hash_ip(ip: str, salt: str) -> str:
     return hashlib.sha256(f"{ip}{salt}".encode()).hexdigest()[:16]
 
 
-# ── Health ──────────────────────────────────────────────────────────────
+def _get_client_ip(request: web.Request) -> str:
+    forwarded = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+    if forwarded:
+        return forwarded
+    return request.remote or "0.0.0.0"
+
+
+def require_auth(handler):
+    @functools.wraps(handler)
+    async def wrapper(request: web.Request) -> web.Response:
+        auth = _get_auth(request)
+        try:
+            user = await auth.authenticate_request(request)
+            request["user"] = user
+        except AuthError as exc:
+            return _error(exc.message, exc.status)
+        return await handler(request)
+    return wrapper
+
+
+def require_role(role: str):
+    def decorator(handler):
+        @functools.wraps(handler)
+        async def wrapper(request: web.Request) -> web.Response:
+            auth = _get_auth(request)
+            try:
+                user = await auth.authenticate_request(request)
+                request["user"] = user
+            except AuthError as exc:
+                return _error(exc.message, exc.status)
+
+            if not auth.require_role(user["role"], role):
+                return _error("Insufficient permissions", 403)
+
+            return await handler(request)
+        return wrapper
+    return decorator
+
+
+# ── Global Health ────────────────────────────────────────────────────────
+
+
+@routes.get("/health")
+async def global_health(request: web.Request) -> web.Response:
+    db = _get_db(request)
+    try:
+        await db.db.execute("SELECT 1")
+        return _json_response({
+            "status": "ok",
+            "service": "ghostly",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as exc:
+        logger.error("Health check failed: %s", exc)
+        return _json_response({"status": "error", "message": str(exc)}, status=503)
+
+
+# ── Auth Endpoints ───────────────────────────────────────────────────────
+
+
+@routes.post("/api/auth/register")
+async def auth_register(request: web.Request) -> web.Response:
+    auth = _get_auth(request)
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    email = (body.get("email") or "").strip()
+    password = body.get("password") or ""
+    role = body.get("role", "viewer")
+    ip = _get_client_ip(request)
+
+    if not email or not password:
+        return _error("Missing 'email' or 'password'")
+
+    try:
+        result = await auth.register(email, password, role, ip)
+    except AuthError as exc:
+        return _error(exc.message, exc.status)
+
+    return _json_response(result, status=201)
+
+
+@routes.post("/api/auth/login")
+async def auth_login(request: web.Request) -> web.Response:
+    auth = _get_auth(request)
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    email = (body.get("email") or "").strip()
+    password = body.get("password") or ""
+    ip = _get_client_ip(request)
+
+    if not email or not password:
+        return _error("Missing 'email' or 'password'")
+
+    try:
+        result = await auth.login(email, password, ip)
+    except AuthError as exc:
+        return _error(exc.message, exc.status)
+
+    return _json_response(result)
+
+
+@routes.post("/api/auth/refresh")
+@require_auth
+async def auth_refresh(request: web.Request) -> web.Response:
+    auth = _get_auth(request)
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    refresh_token = body.get("refresh_token") or ""
+    ip = _get_client_ip(request)
+
+    if not refresh_token:
+        return _error("Missing 'refresh_token'")
+
+    try:
+        result = await auth.refresh_token(refresh_token, ip)
+    except AuthError as exc:
+        return _error(exc.message, exc.status)
+
+    return _json_response(result)
+
+
+@routes.post("/api/auth/logout")
+@require_auth
+async def auth_logout(request: web.Request) -> web.Response:
+    auth = _get_auth(request)
+    user = _get_user(request)
+    ip = _get_client_ip(request)
+
+    session_id = None
+    try:
+        body = await request.json()
+        session_id = body.get("session_id")
+    except Exception:
+        pass
+
+    await auth.logout(user["user_id"], session_id, ip)
+    return _json_response({"ok": True})
+
+
+@routes.get("/api/auth/me")
+@require_auth
+async def auth_me(request: web.Request) -> web.Response:
+    auth = _get_auth(request)
+    user = _get_user(request)
+
+    user_data = await auth.get_user(user["user_id"])
+    if not user_data:
+        return _error("User not found", 404)
+
+    return _json_response({"user": user_data})
+
+
+@routes.put("/api/auth/password")
+@require_auth
+async def auth_change_password(request: web.Request) -> web.Response:
+    auth = _get_auth(request)
+    user = _get_user(request)
+    ip = _get_client_ip(request)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    current_password = body.get("current_password") or ""
+    new_password = body.get("new_password") or ""
+
+    if not current_password or not new_password:
+        return _error("Missing 'current_password' or 'new_password'")
+
+    try:
+        await auth.change_password(user["user_id"], current_password, new_password, ip)
+    except AuthError as exc:
+        return _error(exc.message, exc.status)
+
+    return _json_response({"ok": True})
+
+
+@routes.post("/api/auth/password/reset/request")
+async def auth_password_reset_request(request: web.Request) -> web.Response:
+    auth = _get_auth(request)
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    email = (body.get("email") or "").strip()
+    ip = _get_client_ip(request)
+
+    if not email:
+        return _error("Missing 'email'")
+
+    token = await auth.request_password_reset(email, ip)
+
+    return _json_response({
+        "ok": True,
+        "message": "If the email exists, a reset link has been sent",
+    })
+
+
+@routes.post("/api/auth/password/reset")
+async def auth_password_reset(request: web.Request) -> web.Response:
+    auth = _get_auth(request)
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    token = body.get("token") or ""
+    new_password = body.get("new_password") or ""
+    ip = _get_client_ip(request)
+
+    if not token or not new_password:
+        return _error("Missing 'token' or 'new_password'")
+
+    try:
+        await auth.reset_password(token, new_password, ip)
+    except AuthError as exc:
+        return _error(exc.message, exc.status)
+
+    return _json_response({"ok": True})
+
+
+# ── User API Keys ────────────────────────────────────────────────────────
+
+
+@routes.get("/api/auth/api-keys")
+@require_auth
+async def list_user_api_keys(request: web.Request) -> web.Response:
+    auth = _get_auth(request)
+    user = _get_user(request)
+    keys = await auth.get_api_keys(user["user_id"])
+    return _json_response({"api_keys": keys})
+
+
+@routes.post("/api/auth/api-keys")
+@require_auth
+async def create_user_api_key(request: web.Request) -> web.Response:
+    auth = _get_auth(request)
+    user = _get_user(request)
+    ip = _get_client_ip(request)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    name = (body.get("name") or "unnamed").strip()
+    permissions = body.get("permissions", ["read"])
+    rate_limit = body.get("rate_limit", 1000)
+    expires_in_days = body.get("expires_in_days")
+
+    try:
+        key_data = await auth.create_api_key(
+            user_id=user["user_id"],
+            name=name,
+            permissions=permissions,
+            rate_limit=rate_limit,
+            expires_in_days=expires_in_days,
+            ip=ip,
+        )
+    except AuthError as exc:
+        return _error(exc.message, exc.status)
+
+    return _json_response(key_data, status=201)
+
+
+@routes.delete("/api/auth/api-keys/{id}")
+@require_auth
+async def delete_user_api_key(request: web.Request) -> web.Response:
+    auth = _get_auth(request)
+    user = _get_user(request)
+    ip = _get_client_ip(request)
+    key_id = int(request.match_info["id"])
+
+    deleted = await auth.revoke_api_key(key_id, user["user_id"], ip)
+    if not deleted:
+        return _error("API key not found", status=404)
+    return _json_response({"ok": True})
+
+
+# ── Admin Endpoints ──────────────────────────────────────────────────────
+
+
+@routes.get("/api/admin/users")
+@require_role("admin")
+async def admin_list_users(request: web.Request) -> web.Response:
+    auth = _get_auth(request)
+    users = await auth.list_users()
+    return _json_response({"users": users})
+
+
+@routes.delete("/api/admin/users/{id}")
+@require_role("admin")
+async def admin_delete_user(request: web.Request) -> web.Response:
+    auth = _get_auth(request)
+    admin_user = _get_user(request)
+    target_user_id = int(request.match_info["id"])
+    ip = _get_client_ip(request)
+
+    if admin_user["user_id"] == target_user_id:
+        return _error("Cannot delete your own account", 400)
+
+    try:
+        await auth.delete_user_account(admin_user["user_id"], target_user_id, ip)
+    except AuthError as exc:
+        return _error(exc.message, exc.status)
+
+    return _json_response({"ok": True})
+
+
+@routes.put("/api/admin/users/{id}/role")
+@require_role("admin")
+async def admin_update_user_role(request: web.Request) -> web.Response:
+    auth = _get_auth(request)
+    admin_user = _get_user(request)
+    target_user_id = int(request.match_info["id"])
+    ip = _get_client_ip(request)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    new_role = (body.get("role") or "").strip()
+    if not new_role:
+        return _error("Missing 'role'")
+
+    try:
+        await auth.update_user_role(admin_user["user_id"], target_user_id, new_role, ip)
+    except AuthError as exc:
+        return _error(exc.message, exc.status)
+
+    return _json_response({"ok": True})
+
+
+@routes.put("/api/admin/users/{id}/activate")
+@require_role("admin")
+async def admin_activate_user(request: web.Request) -> web.Response:
+    auth = _get_auth(request)
+    admin_user = _get_user(request)
+    target_user_id = int(request.match_info["id"])
+    ip = _get_client_ip(request)
+
+    try:
+        await auth.activate_user(admin_user["user_id"], target_user_id, ip)
+    except AuthError as exc:
+        return _error(exc.message, exc.status)
+
+    return _json_response({"ok": True})
+
+
+@routes.put("/api/admin/users/{id}/deactivate")
+@require_role("admin")
+async def admin_deactivate_user(request: web.Request) -> web.Response:
+    auth = _get_auth(request)
+    admin_user = _get_user(request)
+    target_user_id = int(request.match_info["id"])
+    ip = _get_client_ip(request)
+
+    if admin_user["user_id"] == target_user_id:
+        return _error("Cannot deactivate your own account", 400)
+
+    try:
+        await auth.deactivate_user(admin_user["user_id"], target_user_id, ip)
+    except AuthError as exc:
+        return _error(exc.message, exc.status)
+
+    return _json_response({"ok": True})
+
+
+@routes.get("/api/admin/audit")
+@require_role("admin")
+async def admin_audit_log(request: web.Request) -> web.Response:
+    auth = _get_auth(request)
+    limit = _parse_limit(request, default=100)
+    offset_raw = request.query.get("offset", "0")
+    try:
+        offset = max(0, int(offset_raw))
+    except ValueError:
+        offset = 0
+
+    log = await auth.get_audit_log(limit=limit, offset=offset)
+    return _json_response({"audit_log": log, "limit": limit, "offset": offset})
+
+
+@routes.get("/api/admin/health")
+@require_role("admin")
+async def admin_health(request: web.Request) -> web.Response:
+    auth = _get_auth(request)
+    status = await auth.get_health_status()
+    return _json_response(status)
+
+
+@routes.get("/api/admin/stats")
+@require_role("admin")
+async def admin_stats(request: web.Request) -> web.Response:
+    db = _get_db(request)
+    stats = await db.get_system_stats()
+    return _json_response(stats)
+
+
+# ── Health (site-level, kept for backward compat) ────────────────────────
 
 
 @routes.get("/api/health")
@@ -197,17 +623,17 @@ async def track(request: web.Request) -> web.Response:
     try:
         now_iso = datetime.now(timezone.utc).isoformat()
         existing = await db._fetch_one(
-            "SELECT id, page_count FROM sessions WHERE id=?",
+            "SELECT id, page_count FROM analytics_sessions WHERE id=?",
             (session_id,),
         )
         if existing:
             await db.db.execute(
-                "UPDATE sessions SET page_count = page_count + 1 WHERE id=?",
+                "UPDATE analytics_sessions SET page_count = page_count + 1 WHERE id=?",
                 (session_id,),
             )
         else:
             await db.db.execute(
-                """INSERT INTO sessions (id, site_id, visitor_id, started_at, page_count, referrer, browser, os, device_type, country)
+                """INSERT INTO analytics_sessions (id, site_id, visitor_id, started_at, page_count, referrer, browser, os, device_type, country)
                    VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)""",
                 (session_id, site_id, visitor_id, now_iso, referrer, browser, os, device_type, country),
             )
@@ -239,6 +665,7 @@ async def track(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites")
+@require_auth
 async def list_sites(request: web.Request) -> web.Response:
     db = _get_db(request)
     sites = await db._fetch_all(
@@ -248,6 +675,7 @@ async def list_sites(request: web.Request) -> web.Response:
 
 
 @routes.post("/api/sites")
+@require_role("editor")
 async def create_site(request: web.Request) -> web.Response:
     try:
         body = await request.json()
@@ -276,6 +704,10 @@ async def create_site(request: web.Request) -> web.Response:
     await db.db.commit()
     site_id = cursor.lastrowid
 
+    user = _get_user(request)
+    auth = _get_auth(request)
+    await auth.db.log_audit(user["user_id"], "site_create", "site", {"site_id": site_id, "domain": clean_domain}, _get_client_ip(request))
+
     return _json_response(
         {"id": site_id, "domain": clean_domain, "name": name or clean_domain},
         status=201,
@@ -283,6 +715,7 @@ async def create_site(request: web.Request) -> web.Response:
 
 
 @routes.delete("/api/sites/{id}")
+@require_role("editor")
 async def delete_site(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -291,6 +724,11 @@ async def delete_site(request: web.Request) -> web.Response:
         return _error("Site not found", status=404)
     await db.db.execute("DELETE FROM sites WHERE id=?", (site_id,))
     await db.db.commit()
+
+    user = _get_user(request)
+    auth = _get_auth(request)
+    await auth.db.log_audit(user["user_id"], "site_delete", "site", {"site_id": site_id}, _get_client_ip(request))
+
     return _json_response({"ok": True})
 
 
@@ -298,6 +736,7 @@ async def delete_site(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/stats")
+@require_auth
 async def site_stats(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -319,6 +758,7 @@ async def site_stats(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/pages")
+@require_auth
 async def site_pages(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -334,6 +774,7 @@ async def site_pages(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/referrers")
+@require_auth
 async def site_referrers(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -349,6 +790,7 @@ async def site_referrers(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/devices")
+@require_auth
 async def site_devices(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -363,6 +805,7 @@ async def site_devices(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/browsers")
+@require_auth
 async def site_browsers(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -377,6 +820,7 @@ async def site_browsers(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/countries")
+@require_auth
 async def site_countries(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -392,6 +836,7 @@ async def site_countries(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/daily")
+@require_auth
 async def site_daily(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -406,6 +851,7 @@ async def site_daily(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/hourly")
+@require_auth
 async def site_hourly(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -420,6 +866,7 @@ async def site_hourly(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/realtime")
+@require_auth
 async def site_realtime(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -429,8 +876,7 @@ async def site_realtime(request: web.Request) -> web.Response:
         return _error("Site not found", status=404)
 
     now = datetime.now(timezone.utc)
-    since_iso = now.isoformat()
-    five_min_ago = (now - __import__("datetime").timedelta(minutes=5)).isoformat()
+    five_min_ago = (now - timedelta(minutes=5)).isoformat()
 
     active = await db._fetch_one(
         """SELECT COUNT(DISTINCT visitor_id) AS active_visitors
@@ -458,6 +904,7 @@ async def site_realtime(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/retention")
+@require_auth
 async def site_retention(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -475,6 +922,7 @@ async def site_retention(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/api-keys")
+@require_auth
 async def list_api_keys(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -489,6 +937,7 @@ async def list_api_keys(request: web.Request) -> web.Response:
 
 
 @routes.post("/api/sites/{id}/api-keys")
+@require_role("editor")
 async def create_api_key(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -519,6 +968,7 @@ async def create_api_key(request: web.Request) -> web.Response:
 
 
 @routes.delete("/api/api-keys/{id}")
+@require_auth
 async def delete_api_key(request: web.Request) -> web.Response:
     key_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -531,6 +981,7 @@ async def delete_api_key(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/api-keys/{id}")
+@require_auth
 async def get_api_key(request: web.Request) -> web.Response:
     key_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -546,6 +997,7 @@ async def get_api_key(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/alerts")
+@require_auth
 async def list_alerts(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -560,6 +1012,7 @@ async def list_alerts(request: web.Request) -> web.Response:
 
 
 @routes.post("/api/sites/{id}/alerts")
+@require_role("editor")
 async def create_alert(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -603,6 +1056,7 @@ async def create_alert(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/alerts/{id}")
+@require_auth
 async def get_alert(request: web.Request) -> web.Response:
     alert_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -615,6 +1069,7 @@ async def get_alert(request: web.Request) -> web.Response:
 
 
 @routes.patch("/api/alerts/{id}")
+@require_role("editor")
 async def update_alert(request: web.Request) -> web.Response:
     alert_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -646,6 +1101,7 @@ async def update_alert(request: web.Request) -> web.Response:
 
 
 @routes.delete("/api/alerts/{id}")
+@require_role("editor")
 async def delete_alert(request: web.Request) -> web.Response:
     alert_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -658,6 +1114,7 @@ async def delete_alert(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/alerts/history")
+@require_auth
 async def alert_history(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -676,6 +1133,7 @@ async def alert_history(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/funnels")
+@require_auth
 async def list_funnels(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -690,6 +1148,7 @@ async def list_funnels(request: web.Request) -> web.Response:
 
 
 @routes.post("/api/sites/{id}/funnels")
+@require_role("editor")
 async def create_funnel(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -723,6 +1182,7 @@ async def create_funnel(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/funnels/{id}")
+@require_auth
 async def get_funnel(request: web.Request) -> web.Response:
     funnel_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -735,6 +1195,7 @@ async def get_funnel(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/funnels/{id}/stats")
+@require_auth
 async def funnel_stats(request: web.Request) -> web.Response:
     funnel_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -749,6 +1210,7 @@ async def funnel_stats(request: web.Request) -> web.Response:
 
 
 @routes.delete("/api/funnels/{id}")
+@require_role("editor")
 async def delete_funnel(request: web.Request) -> web.Response:
     funnel_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -764,6 +1226,7 @@ async def delete_funnel(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/goals")
+@require_auth
 async def list_goals(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -778,6 +1241,7 @@ async def list_goals(request: web.Request) -> web.Response:
 
 
 @routes.post("/api/sites/{id}/goals")
+@require_role("editor")
 async def create_goal(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -815,6 +1279,7 @@ async def create_goal(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/goals/{id}")
+@require_auth
 async def get_goal(request: web.Request) -> web.Response:
     goal_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -827,6 +1292,7 @@ async def get_goal(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/goals/{id}/stats")
+@require_auth
 async def goal_stats(request: web.Request) -> web.Response:
     goal_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -841,6 +1307,7 @@ async def goal_stats(request: web.Request) -> web.Response:
 
 
 @routes.delete("/api/goals/{id}")
+@require_role("editor")
 async def delete_goal(request: web.Request) -> web.Response:
     goal_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -856,6 +1323,7 @@ async def delete_goal(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/export")
+@require_auth
 async def export_data(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -897,6 +1365,7 @@ async def export_data(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/export/history")
+@require_auth
 async def export_history(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -914,6 +1383,7 @@ async def export_history(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/dashboard")
+@require_auth
 async def site_dashboard(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -953,6 +1423,7 @@ async def site_dashboard(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/webhooks")
+@require_auth
 async def list_webhooks(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -966,6 +1437,7 @@ async def list_webhooks(request: web.Request) -> web.Response:
 
 
 @routes.post("/api/sites/{id}/webhooks")
+@require_role("editor")
 async def create_webhook(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -999,6 +1471,7 @@ async def create_webhook(request: web.Request) -> web.Response:
 
 
 @routes.delete("/api/webhooks/{id}")
+@require_role("editor")
 async def delete_webhook(request: web.Request) -> web.Response:
     webhook_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -1013,6 +1486,7 @@ async def delete_webhook(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/email/config")
+@require_role("editor")
 async def get_email_config(request: web.Request) -> web.Response:
     from ghostly.core.email import EmailReporter
     db = _get_db(request)
@@ -1022,6 +1496,7 @@ async def get_email_config(request: web.Request) -> web.Response:
 
 
 @routes.post("/api/email/config")
+@require_role("editor")
 async def save_email_config(request: web.Request) -> web.Response:
     from ghostly.core.email import EmailReporter
     db = _get_db(request)
@@ -1041,6 +1516,7 @@ async def save_email_config(request: web.Request) -> web.Response:
 
 
 @routes.post("/api/email/test")
+@require_role("editor")
 async def send_test_email(request: web.Request) -> web.Response:
     from ghostly.core.email import EmailReporter
     db = _get_db(request)
@@ -1063,6 +1539,7 @@ async def send_test_email(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/email/schedules")
+@require_auth
 async def list_email_schedules(request: web.Request) -> web.Response:
     from ghostly.core.email import EmailReporter
     site_id = int(request.match_info["id"])
@@ -1079,6 +1556,7 @@ async def list_email_schedules(request: web.Request) -> web.Response:
 
 
 @routes.post("/api/sites/{id}/email/schedules")
+@require_role("editor")
 async def create_email_schedule(request: web.Request) -> web.Response:
     from ghostly.core.email import EmailReporter
     site_id = int(request.match_info["id"])
@@ -1110,6 +1588,7 @@ async def create_email_schedule(request: web.Request) -> web.Response:
 
 
 @routes.delete("/api/email/schedules/{id}")
+@require_role("editor")
 async def delete_email_schedule(request: web.Request) -> web.Response:
     from ghostly.core.email import EmailReporter
     schedule_id = int(request.match_info["id"])
@@ -1122,6 +1601,7 @@ async def delete_email_schedule(request: web.Request) -> web.Response:
 
 
 @routes.post("/api/sites/{id}/email/send")
+@require_role("editor")
 async def send_report_now(request: web.Request) -> web.Response:
     from ghostly.core.email import EmailReporter
     site_id = int(request.match_info["id"])
@@ -1152,6 +1632,7 @@ async def send_report_now(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/webhooks/history")
+@require_auth
 async def webhook_history(request: web.Request) -> web.Response:
     from ghostly.core.webhooks import WebhookManager
     site_id = int(request.match_info["id"])
@@ -1167,6 +1648,7 @@ async def webhook_history(request: web.Request) -> web.Response:
 
 
 @routes.post("/api/webhooks/{id}/test")
+@require_role("editor")
 async def test_webhook(request: web.Request) -> web.Response:
     from ghostly.core.webhooks import WebhookManager
     webhook_id = int(request.match_info["id"])
@@ -1221,6 +1703,7 @@ async def record_heatmap_click(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/heatmap/grid")
+@require_auth
 async def heatmap_grid(request: web.Request) -> web.Response:
     from ghostly.core.heatmap import HeatmapCollector
     site_id = int(request.match_info["id"])
@@ -1239,6 +1722,7 @@ async def heatmap_grid(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/heatmap/sections")
+@require_auth
 async def heatmap_sections(request: web.Request) -> web.Response:
     from ghostly.core.heatmap import HeatmapCollector
     site_id = int(request.match_info["id"])
@@ -1257,6 +1741,7 @@ async def heatmap_sections(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/heatmap/elements")
+@require_auth
 async def heatmap_elements(request: web.Request) -> web.Response:
     from ghostly.core.heatmap import HeatmapCollector
     site_id = int(request.match_info["id"])
@@ -1275,6 +1760,7 @@ async def heatmap_elements(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/heatmap/pages")
+@require_auth
 async def heatmap_pages(request: web.Request) -> web.Response:
     from ghostly.core.heatmap import HeatmapCollector
     site_id = int(request.match_info["id"])
@@ -1292,6 +1778,7 @@ async def heatmap_pages(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/heatmap/clicks")
+@require_auth
 async def heatmap_clicks(request: web.Request) -> web.Response:
     from ghostly.core.heatmap import HeatmapCollector
     site_id = int(request.match_info["id"])
@@ -1313,6 +1800,7 @@ async def heatmap_clicks(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/themes")
+@require_auth
 async def list_themes(request: web.Request) -> web.Response:
     from ghostly.core.themes import ThemeManager
     db = _get_db(request)
@@ -1322,6 +1810,7 @@ async def list_themes(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/themes/{id}")
+@require_auth
 async def get_theme(request: web.Request) -> web.Response:
     from ghostly.core.themes import ThemeManager
     theme_id = request.match_info["id"]
@@ -1334,6 +1823,7 @@ async def get_theme(request: web.Request) -> web.Response:
 
 
 @routes.post("/api/themes")
+@require_role("editor")
 async def create_theme(request: web.Request) -> web.Response:
     from ghostly.core.themes import ThemeManager
     db = _get_db(request)
@@ -1358,6 +1848,7 @@ async def create_theme(request: web.Request) -> web.Response:
 
 
 @routes.delete("/api/themes/{id}")
+@require_role("editor")
 async def delete_theme(request: web.Request) -> web.Response:
     from ghostly.core.themes import ThemeManager
     theme_id = request.match_info["id"]
@@ -1373,6 +1864,7 @@ async def delete_theme(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/themes/{id}/css")
+@require_auth
 async def get_theme_css(request: web.Request) -> web.Response:
     from ghostly.core.themes import ThemeManager
     theme_id = request.match_info["id"]
@@ -1383,6 +1875,7 @@ async def get_theme_css(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/users/{id}/theme")
+@require_auth
 async def get_user_theme(request: web.Request) -> web.Response:
     from ghostly.core.themes import ThemeManager
     user_id = request.match_info["id"]
@@ -1393,6 +1886,7 @@ async def get_user_theme(request: web.Request) -> web.Response:
 
 
 @routes.post("/api/users/{id}/theme")
+@require_auth
 async def set_user_theme(request: web.Request) -> web.Response:
     from ghostly.core.themes import ThemeManager
     user_id = request.match_info["id"]
@@ -1419,6 +1913,7 @@ async def set_user_theme(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/plugins")
+@require_auth
 async def list_plugins(request: web.Request) -> web.Response:
     from ghostly.core.plugins import PluginManager
     db = _get_db(request)
@@ -1429,6 +1924,7 @@ async def list_plugins(request: web.Request) -> web.Response:
 
 
 @routes.post("/api/plugins/reload")
+@require_role("admin")
 async def reload_plugins(request: web.Request) -> web.Response:
     from ghostly.core.plugins import PluginManager
     db = _get_db(request)
@@ -1439,6 +1935,7 @@ async def reload_plugins(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/plugins/{name}")
+@require_auth
 async def get_plugin(request: web.Request) -> web.Response:
     from ghostly.core.plugins import PluginManager
     name = request.match_info["name"]
@@ -1454,6 +1951,7 @@ async def get_plugin(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/backups")
+@require_auth
 async def list_backups(request: web.Request) -> web.Response:
     from ghostly.core.backup import BackupManager
     db = _get_db(request)
@@ -1463,6 +1961,7 @@ async def list_backups(request: web.Request) -> web.Response:
 
 
 @routes.post("/api/backups")
+@require_role("admin")
 async def create_backup(request: web.Request) -> web.Response:
     from ghostly.core.backup import BackupManager
     db = _get_db(request)
@@ -1480,6 +1979,7 @@ async def create_backup(request: web.Request) -> web.Response:
 
 
 @routes.post("/api/backups/restore")
+@require_role("admin")
 async def restore_backup(request: web.Request) -> web.Response:
     from ghostly.core.backup import BackupManager
     db = _get_db(request)
@@ -1502,6 +2002,7 @@ async def restore_backup(request: web.Request) -> web.Response:
 
 
 @routes.delete("/api/backups/{filename}")
+@require_role("admin")
 async def delete_backup(request: web.Request) -> web.Response:
     from ghostly.core.backup import BackupManager
     filename = request.match_info["filename"]
@@ -1514,6 +2015,7 @@ async def delete_backup(request: web.Request) -> web.Response:
 
 
 @routes.post("/api/backups/prune")
+@require_role("admin")
 async def prune_backups(request: web.Request) -> web.Response:
     from ghostly.core.backup import BackupManager
     db = _get_db(request)
@@ -1564,6 +2066,7 @@ async def record_geo_location(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/geomap/countries")
+@require_auth
 async def geomap_countries(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -1579,6 +2082,7 @@ async def geomap_countries(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/geomap/cities")
+@require_auth
 async def geomap_cities(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -1595,6 +2099,7 @@ async def geomap_cities(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/geomap/top-countries")
+@require_auth
 async def geomap_top_countries(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -1611,6 +2116,7 @@ async def geomap_top_countries(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/geomap/top-cities")
+@require_auth
 async def geomap_top_cities(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -1627,6 +2133,7 @@ async def geomap_top_cities(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/geomap/geojson")
+@require_auth
 async def geomap_geojson(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -1642,6 +2149,7 @@ async def geomap_geojson(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/geomap/country-geojson")
+@require_auth
 async def geomap_country_geojson(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -1657,6 +2165,7 @@ async def geomap_country_geojson(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/geomap/distribution")
+@require_auth
 async def geomap_distribution(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -1672,6 +2181,7 @@ async def geomap_distribution(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/geomap/summary")
+@require_auth
 async def geomap_summary(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -1690,6 +2200,7 @@ async def geomap_summary(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/retention/daily")
+@require_auth
 async def retention_daily(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -1705,6 +2216,7 @@ async def retention_daily(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/retention/weekly")
+@require_auth
 async def retention_weekly(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -1719,6 +2231,7 @@ async def retention_weekly(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/retention/monthly")
+@require_auth
 async def retention_monthly(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -1733,6 +2246,7 @@ async def retention_monthly(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/retention/cohort")
+@require_auth
 async def retention_cohort(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -1749,6 +2263,7 @@ async def retention_cohort(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/retention/churn")
+@require_auth
 async def retention_churn(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -1771,6 +2286,7 @@ async def retention_churn(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/retention/return-visitors")
+@require_auth
 async def retention_return_visitors(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -1786,6 +2302,7 @@ async def retention_return_visitors(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/retention/summary")
+@require_auth
 async def retention_summary(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -1804,6 +2321,7 @@ async def retention_summary(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/experiments")
+@require_auth
 async def list_experiments(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -1818,6 +2336,7 @@ async def list_experiments(request: web.Request) -> web.Response:
 
 
 @routes.post("/api/sites/{id}/experiments")
+@require_role("editor")
 async def create_experiment(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -1857,6 +2376,7 @@ async def create_experiment(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/experiments/{id}")
+@require_auth
 async def get_experiment(request: web.Request) -> web.Response:
     experiment_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -1869,6 +2389,7 @@ async def get_experiment(request: web.Request) -> web.Response:
 
 
 @routes.post("/api/experiments/{id}/start")
+@require_role("editor")
 async def start_experiment(request: web.Request) -> web.Response:
     experiment_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -1881,6 +2402,7 @@ async def start_experiment(request: web.Request) -> web.Response:
 
 
 @routes.post("/api/experiments/{id}/stop")
+@require_role("editor")
 async def stop_experiment(request: web.Request) -> web.Response:
     experiment_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -1893,6 +2415,7 @@ async def stop_experiment(request: web.Request) -> web.Response:
 
 
 @routes.delete("/api/experiments/{id}")
+@require_role("editor")
 async def delete_experiment(request: web.Request) -> web.Response:
     experiment_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -1955,6 +2478,7 @@ async def track_ab_conversion(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/experiments/{id}/stats")
+@require_auth
 async def experiment_stats(request: web.Request) -> web.Response:
     experiment_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -1968,6 +2492,7 @@ async def experiment_stats(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/experiments/{id}/significance")
+@require_auth
 async def experiment_significance(request: web.Request) -> web.Response:
     experiment_id = int(request.match_info["id"])
     db = _get_db(request)
@@ -1979,6 +2504,7 @@ async def experiment_significance(request: web.Request) -> web.Response:
 
 
 @routes.get("/api/sites/{id}/experiments/summary")
+@require_auth
 async def experiments_summary(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)

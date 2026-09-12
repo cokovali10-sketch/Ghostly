@@ -1,0 +1,38 @@
+{
+  "name": "Ghostly Analytics",
+  "short_name": "Ghostly",
+  "description": "Privacy-first, open-source web analytics dashboard",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#06060a",
+  "theme_color": "#00d4ff",
+  "categories": ["analytics", "business", "developer tools"],
+  "icons": [
+    {
+      "src": "/static/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "url": "/#dashboard",
+      "icons": [{ "src": "/static/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Real-time",
+      "url": "/#realtime",
+      "icons": [{ "src": "/static/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

@@ -1,6 +1,9 @@
 # Ghostly Analytics - Core Dependencies
 aiohttp>=3.9.0
 aiosqlite>=0.19.0
+cryptography>=41.0.0
+bcrypt>=4.1.0
+PyJWT>=2.8.0
 
 # Development Dependencies
 pytest>=7.0.0

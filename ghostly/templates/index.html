@@ -2,20 +2,161 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+  <meta name="description" content="Ghostly Analytics — Privacy-first web analytics dashboard">
+  <meta name="theme-color" content="#00d4ff">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Ghostly">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <title>Ghostly Analytics</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/icon-32.png">
   <link rel="stylesheet" href="/static/style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" defer></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+      });
+    }
+  </script>
 </head>
 <body>
-  <div class="app">
-    <aside class="sidebar" id="sidebar">
+  <!-- ═══════════════════════════════════════════════════════════════════
+       AUTH PAGES (Login / Register)
+       ═══════════════════════════════════════════════════════════════════ -->
+  <div class="auth-wrapper" id="authWrapper" role="main" aria-label="Authentication">
+    <div class="auth-card">
+      <div class="auth-logo">
+        <svg class="auth-logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M12 2C6.48 2 2 6.48 2 12c0 3.3 1.6 6.2 4 8v2c0 .55.45 1 1 1h8c.55 0 1-.45 1-1v-2c2.4-1.8 4-4.7 4-8 0-5.52-4.48-10-10-10z"/>
+          <path d="M10 15l-2-2m0 0l2-2m-2 2h6m-3-2v4" stroke-linecap="round"/>
+        </svg>
+        <h1 class="auth-brand">Ghostly</h1>
+        <p class="auth-tagline">Privacy-first analytics</p>
+      </div>
+
+      <!-- Login Form -->
+      <form class="auth-form" id="loginForm" aria-label="Login" novalidate>
+        <h2 class="auth-title" id="authTitle">Sign in</h2>
+        <div class="form-group">
+          <label for="loginEmail" class="form-label">Email address</label>
+          <input type="email" id="loginEmail" class="form-input" placeholder="you@example.com" autocomplete="email" required aria-required="true">
+          <span class="form-error" id="loginEmailError" role="alert" aria-live="polite"></span>
+        </div>
+        <div class="form-group">
+          <label for="loginPassword" class="form-label">Password</label>
+          <div class="password-input-wrap">
+            <input type="password" id="loginPassword" class="form-input" placeholder="Enter password" autocomplete="current-password" required aria-required="true" minlength="6">
+            <button type="button" class="password-toggle" id="loginPasswordToggle" aria-label="Show password" tabindex="0">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+          <span class="form-error" id="loginPasswordError" role="alert" aria-live="polite"></span>
+        </div>
+        <div class="form-row" style="align-items:center">
+          <label class="checkbox-label">
+            <input type="checkbox" id="rememberMe" checked>
+            <span>Remember me</span>
+          </label>
+          <a href="#forgot" class="auth-link" id="forgotLink">Forgot password?</a>
+        </div>
+        <button type="submit" class="btn btn-primary btn-full" id="loginSubmit">
+          <span class="btn-text">Sign in</span>
+          <span class="btn-spinner" aria-hidden="true"></span>
+        </button>
+        <div class="auth-divider"><span>or</span></div>
+        <button type="button" class="btn btn-secondary btn-full" id="demoLoginBtn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Continue with Demo
+        </button>
+        <p class="auth-switch">Don't have an account? <a href="#register" id="showRegister" class="auth-link">Create one</a></p>
+      </form>
+
+      <!-- Register Form -->
+      <form class="auth-form" id="registerForm" style="display:none" aria-label="Register" novalidate>
+        <h2 class="auth-title">Create account</h2>
+        <div class="form-group">
+          <label for="regName" class="form-label">Full name</label>
+          <input type="text" id="regName" class="form-input" placeholder="John Doe" autocomplete="name" required aria-required="true">
+          <span class="form-error" id="regNameError" role="alert" aria-live="polite"></span>
+        </div>
+        <div class="form-group">
+          <label for="regEmail" class="form-label">Email address</label>
+          <input type="email" id="regEmail" class="form-input" placeholder="you@example.com" autocomplete="email" required aria-required="true">
+          <span class="form-error" id="regEmailError" role="alert" aria-live="polite"></span>
+        </div>
+        <div class="form-group">
+          <label for="regPassword" class="form-label">Password</label>
+          <div class="password-input-wrap">
+            <input type="password" id="regPassword" class="form-input" placeholder="Min 8 characters" autocomplete="new-password" required aria-required="true" minlength="8">
+            <button type="button" class="password-toggle" id="regPasswordToggle" aria-label="Show password" tabindex="0">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+          <div class="password-strength" id="passwordStrength" aria-live="polite">
+            <div class="password-strength-bar"><div class="password-strength-fill" id="strengthFill"></div></div>
+            <span class="password-strength-text" id="strengthText"></span>
+          </div>
+          <span class="form-error" id="regPasswordError" role="alert" aria-live="polite"></span>
+        </div>
+        <div class="form-group">
+          <label for="regPasswordConfirm" class="form-label">Confirm password</label>
+          <input type="password" id="regPasswordConfirm" class="form-input" placeholder="Repeat password" autocomplete="new-password" required aria-required="true">
+          <span class="form-error" id="regPasswordConfirmError" role="alert" aria-live="polite"></span>
+        </div>
+        <label class="checkbox-label">
+          <input type="checkbox" id="agreeTerms" required aria-required="true">
+          <span>I agree to the <a href="#terms" class="auth-link">Terms of Service</a></span>
+        </label>
+        <button type="submit" class="btn btn-primary btn-full" id="registerSubmit">
+          <span class="btn-text">Create account</span>
+          <span class="btn-spinner" aria-hidden="true"></span>
+        </button>
+        <p class="auth-switch">Already have an account? <a href="#login" id="showLogin" class="auth-link">Sign in</a></p>
+      </form>
+
+      <!-- Forgot Password Form -->
+      <form class="auth-form" id="forgotForm" style="display:none" aria-label="Forgot password" novalidate>
+        <h2 class="auth-title">Reset password</h2>
+        <p class="auth-desc">Enter your email and we'll send you a reset link.</p>
+        <div class="form-group">
+          <label for="forgotEmail" class="form-label">Email address</label>
+          <input type="email" id="forgotEmail" class="form-input" placeholder="you@example.com" autocomplete="email" required>
+          <span class="form-error" id="forgotEmailError" role="alert" aria-live="polite"></span>
+        </div>
+        <button type="submit" class="btn btn-primary btn-full" id="forgotSubmit">
+          <span class="btn-text">Send reset link</span>
+          <span class="btn-spinner" aria-hidden="true"></span>
+        </button>
+        <p class="auth-switch"><a href="#login" id="showLoginFromForgot" class="auth-link">Back to sign in</a></p>
+      </form>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════
+       MAIN APPLICATION
+       ═══════════════════════════════════════════════════════════════════ -->
+  <div class="app" id="appShell" style="display:none" role="application" aria-label="Ghostly Analytics Dashboard">
+
+    <!-- Offline Banner -->
+    <div class="offline-banner" id="offlineBanner" role="alert" aria-live="assertive" style="display:none">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 019 8.5m-4.86.43A10.96 10.96 0 013.3 9.5"/><path d="M8.53 16.11a6 6 0 016.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+      <span>You're offline. Some features may be unavailable.</span>
+    </div>
+
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar" aria-label="Main navigation">
       <div class="sidebar-header">
         <div class="logo">
           <div class="logo-icon-wrap">
-            <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path d="M12 2C6.48 2 2 6.48 2 12c0 3.3 1.6 6.2 4 8v2c0 .55.45 1 1 1h8c.55 0 1-.45 1-1v-2c2.4-1.8 4-4.7 4-8 0-5.52-4.48-10-10-10z"/>
               <path d="M10 15l-2-2m0 0l2-2m-2 2h6m-3-2v4" stroke-linecap="round"/>
             </svg>
@@ -25,91 +166,99 @@
             <span class="logo-version">v2.0</span>
           </div>
         </div>
-        <button class="sidebar-close" id="sidebarClose">&times;</button>
+        <button class="sidebar-close" id="sidebarClose" aria-label="Close navigation menu">&times;</button>
       </div>
 
-      <nav class="sidebar-nav" id="sidebarNav">
+      <nav class="sidebar-nav" id="sidebarNav" aria-label="Analytics navigation">
         <div class="nav-section">
-          <div class="nav-label">Analytics</div>
-          <a href="#dashboard" class="nav-item active" data-section="dashboard">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          <div class="nav-label" id="navAnalyticsLabel">Analytics</div>
+          <a href="#dashboard" class="nav-item active" data-section="dashboard" role="menuitem" tabindex="0" aria-current="page">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
             <span>Dashboard</span>
           </a>
-          <a href="#realtime" class="nav-item" data-section="realtime">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <a href="#realtime" class="nav-item" data-section="realtime" role="menuitem" tabindex="0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
             <span>Real-time</span>
-            <span class="nav-badge" id="navActiveCount">0</span>
+            <span class="nav-badge" id="navActiveCount" aria-label="Active visitors count">0</span>
           </a>
-          <a href="#heatmap" class="nav-item" data-section="heatmap">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>
+          <a href="#heatmap" class="nav-item" data-section="heatmap" role="menuitem" tabindex="0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>
             <span>Heatmap</span>
           </a>
-          <a href="#pages" class="nav-item" data-section="pages">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          <a href="#pages" class="nav-item" data-section="pages" role="menuitem" tabindex="0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
             <span>Pages</span>
           </a>
-          <a href="#referrers" class="nav-item" data-section="referrers">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+          <a href="#referrers" class="nav-item" data-section="referrers" role="menuitem" tabindex="0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
             <span>Referrers</span>
           </a>
-          <a href="#devices" class="nav-item" data-section="devices">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+          <a href="#devices" class="nav-item" data-section="devices" role="menuitem" tabindex="0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
             <span>Devices</span>
           </a>
-          <a href="#countries" class="nav-item" data-section="countries">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+          <a href="#countries" class="nav-item" data-section="countries" role="menuitem" tabindex="0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
             <span>Countries</span>
           </a>
-          <a href="#retention" class="nav-item" data-section="retention">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+          <a href="#retention" class="nav-item" data-section="retention" role="menuitem" tabindex="0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
             <span>Retention</span>
           </a>
         </div>
         <div class="nav-section">
           <div class="nav-label">Growth</div>
-          <a href="#funnels" class="nav-item" data-section="funnels">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+          <a href="#funnels" class="nav-item" data-section="funnels" role="menuitem" tabindex="0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
             <span>Funnels</span>
           </a>
-          <a href="#goals" class="nav-item" data-section="goals">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+          <a href="#goals" class="nav-item" data-section="goals" role="menuitem" tabindex="0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
             <span>Goals</span>
           </a>
-          <a href="#alerts" class="nav-item" data-section="alerts">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+          <a href="#alerts" class="nav-item" data-section="alerts" role="menuitem" tabindex="0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
             <span>Alerts</span>
           </a>
         </div>
         <div class="nav-section">
           <div class="nav-label">Integrations</div>
-          <a href="#email-reports" class="nav-item" data-section="email-reports">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22 6 12 13 2 6"/></svg>
+          <a href="#email-reports" class="nav-item" data-section="email-reports" role="menuitem" tabindex="0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22 6 12 13 2 6"/></svg>
             <span>Email Reports</span>
           </a>
-          <a href="#webhooks" class="nav-item" data-section="webhooks">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+          <a href="#webhooks" class="nav-item" data-section="webhooks" role="menuitem" tabindex="0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
             <span>Webhooks</span>
           </a>
         </div>
         <div class="nav-section">
           <div class="nav-label">Customize</div>
-          <a href="#themes" class="nav-item" data-section="themes">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12" r="2.5"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.5-.75 1.5-1.5 0-.37-.12-.69-.37-.96-.23-.26-.37-.58-.37-1.04 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-5.52-4.48-9.93-9-10z"/></svg>
+          <a href="#themes" class="nav-item" data-section="themes" role="menuitem" tabindex="0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12" r="2.5"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.5-.75 1.5-1.5 0-.37-.12-.69-.37-.96-.23-.26-.37-.58-.37-1.04 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-5.52-4.48-9.93-9-10z"/></svg>
             <span>Themes</span>
           </a>
-          <a href="#plugins" class="nav-item" data-section="plugins">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+          <a href="#plugins" class="nav-item" data-section="plugins" role="menuitem" tabindex="0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
             <span>Plugins</span>
           </a>
-          <a href="#backup" class="nav-item" data-section="backup">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          <a href="#backup" class="nav-item" data-section="backup" role="menuitem" tabindex="0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             <span>Backup</span>
           </a>
         </div>
         <div class="nav-section">
           <div class="nav-label">Manage</div>
-          <a href="#settings" class="nav-item" data-section="settings">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+          <a href="#admin" class="nav-item" data-section="admin" role="menuitem" tabindex="0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            <span>Admin</span>
+          </a>
+          <a href="#profile" class="nav-item" data-section="profile" role="menuitem" tabindex="0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4-4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <span>Profile</span>
+          </a>
+          <a href="#settings" class="nav-item" data-section="settings" role="menuitem" tabindex="0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
             <span>Settings</span>
           </a>
         </div>
@@ -117,21 +266,21 @@
 
       <div class="sidebar-sites">
         <div class="nav-label">Sites</div>
-        <ul class="sites-list" id="sitesList">
-          <li class="site-item active" data-site-id="all">
+        <ul class="sites-list" id="sitesList" role="listbox" aria-label="Sites">
+          <li class="site-item active" data-site-id="all" role="option" aria-selected="true" tabindex="0">
             <span class="site-dot" style="background:var(--cyan)"></span>
             All Sites
           </li>
         </ul>
-        <button class="add-site-btn" id="addSiteBtn">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <button class="add-site-btn" id="addSiteBtn" aria-label="Add a new site">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           Add Site
         </button>
       </div>
 
       <div class="sidebar-footer">
         <div class="range-picker">
-          <select id="dateRange" class="range-select">
+          <select id="dateRange" class="range-select" aria-label="Date range">
             <option value="24h">Last 24 hours</option>
             <option value="7d" selected>Last 7 days</option>
             <option value="30d">Last 30 days</option>
@@ -139,60 +288,95 @@
           </select>
         </div>
         <div class="privacy-badge">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           <span>Privacy-First Analytics</span>
         </div>
       </div>
     </aside>
 
-    <main class="main" id="main">
-      <header class="topbar">
-        <button class="menu-toggle" id="menuToggle">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    <!-- Main Content -->
+    <main class="main" id="main" role="main">
+      <header class="topbar" role="banner">
+        <button class="menu-toggle" id="menuToggle" aria-label="Open navigation menu" aria-expanded="false" aria-controls="sidebar">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
         </button>
         <div class="topbar-title">
           <h1 id="pageTitle">Dashboard</h1>
           <span class="topbar-subtitle" id="dateRangeLabel">Last 7 days</span>
         </div>
         <div class="topbar-actions">
-          <div class="realtime-badge" id="realtimeBadge">
-            <span class="pulse-dot"></span>
+          <div class="realtime-badge" id="realtimeBadge" aria-live="polite">
+            <span class="pulse-dot" aria-hidden="true"></span>
             <span id="activeNowCount">0</span> active
           </div>
-          <button class="btn-icon" id="refreshBtn" title="Refresh">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+          <button class="btn-icon" id="darkModeToggle" title="Toggle dark/light mode" aria-label="Toggle dark mode">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/></svg>
           </button>
+          <button class="btn-icon" id="printBtn" title="Print report" aria-label="Print current report">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+          </button>
+          <button class="btn-icon" id="refreshBtn" title="Refresh data" aria-label="Refresh dashboard data">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+          </button>
+          <div class="user-menu" id="userMenu">
+            <button class="user-avatar" id="userAvatarBtn" aria-label="User menu" aria-haspopup="true" aria-expanded="false">
+              <span id="userInitial">D</span>
+            </button>
+            <div class="user-dropdown" id="userDropdown" role="menu" aria-label="User options">
+              <div class="user-dropdown-header">
+                <span class="user-dropdown-name" id="userDisplayName">Demo User</span>
+                <span class="user-dropdown-email" id="userDisplayEmail">demo@ghostly.io</span>
+              </div>
+              <div class="user-dropdown-divider"></div>
+              <a href="#profile" class="user-dropdown-item" role="menuitem" data-dropdown-action="profile">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4-4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                Profile
+              </a>
+              <a href="#settings" class="user-dropdown-item" role="menuitem" data-dropdown-action="settings">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4"/></svg>
+                Settings
+              </a>
+              <div class="user-dropdown-divider"></div>
+              <button class="user-dropdown-item user-dropdown-danger" role="menuitem" id="logoutBtn">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                Sign out
+              </button>
+            </div>
+          </div>
         </div>
       </header>
 
-      <div class="content" id="content">
+      <div class="content" id="content" role="region" aria-live="polite" aria-label="Dashboard content">
         <div class="loading-screen" id="loadingScreen">
-          <div class="spinner"></div>
+          <div class="spinner" aria-hidden="true"></div>
           <p>Loading analytics...</p>
         </div>
       </div>
     </main>
   </div>
 
-  <div class="modal-overlay" id="addSiteModal">
+  <!-- ═══════════════════════════════════════════════════════════════════
+       MODALS
+       ═══════════════════════════════════════════════════════════════════ -->
+  <div class="modal-overlay" id="addSiteModal" role="dialog" aria-modal="true" aria-labelledby="addSiteModalTitle">
     <div class="modal">
       <div class="modal-header">
-        <h2>Add New Site</h2>
-        <button class="modal-close" id="closeModal">&times;</button>
+        <h2 id="addSiteModalTitle">Add New Site</h2>
+        <button class="modal-close" id="closeModal" aria-label="Close dialog">&times;</button>
       </div>
       <div class="modal-body">
         <div class="form-group">
           <label for="newSiteName">Site Name</label>
-          <input type="text" id="newSiteName" placeholder="My Awesome Site" class="form-input">
+          <input type="text" id="newSiteName" placeholder="My Awesome Site" class="form-input" autocomplete="off">
         </div>
         <div class="form-group">
           <label for="newSiteDomain">Domain</label>
-          <input type="text" id="newSiteDomain" placeholder="example.com" class="form-input">
+          <input type="text" id="newSiteDomain" placeholder="example.com" class="form-input" autocomplete="off">
         </div>
         <div class="tracking-snippet-box">
           <label>Tracking Snippet</label>
-          <code id="trackingSnippet">&lt;script src="http://localhost:8080/static/tracking.js" data-domain="yourdomain.com"&gt;&lt;/script&gt;</code>
-          <button class="btn btn-sm" id="copySnippet">Copy</button>
+          <code id="trackingSnippet" aria-label="Tracking code snippet">&lt;script src="http://localhost:8080/static/tracking.js" data-domain="yourdomain.com"&gt;&lt;/script&gt;</code>
+          <button class="btn btn-sm" id="copySnippet" aria-label="Copy tracking snippet">Copy</button>
         </div>
       </div>
       <div class="modal-footer">
@@ -202,11 +386,11 @@
     </div>
   </div>
 
-  <div class="modal-overlay" id="alertModal">
+  <div class="modal-overlay" id="alertModal" role="dialog" aria-modal="true" aria-labelledby="alertModalTitle">
     <div class="modal">
       <div class="modal-header">
-        <h2>Create Alert Rule</h2>
-        <button class="modal-close" id="closeAlertModal">&times;</button>
+        <h2 id="alertModalTitle">Create Alert Rule</h2>
+        <button class="modal-close" id="closeAlertModal" aria-label="Close dialog">&times;</button>
       </div>
       <div class="modal-body">
         <div class="form-group">
@@ -244,11 +428,11 @@
     </div>
   </div>
 
-  <div class="modal-overlay" id="funnelModal">
+  <div class="modal-overlay" id="funnelModal" role="dialog" aria-modal="true" aria-labelledby="funnelModalTitle">
     <div class="modal">
       <div class="modal-header">
-        <h2>Create Funnel</h2>
-        <button class="modal-close" id="closeFunnelModal">&times;</button>
+        <h2 id="funnelModalTitle">Create Funnel</h2>
+        <button class="modal-close" id="closeFunnelModal" aria-label="Close dialog">&times;</button>
       </div>
       <div class="modal-body">
         <div class="form-group">
@@ -267,11 +451,11 @@
     </div>
   </div>
 
-  <div class="modal-overlay" id="goalModal">
+  <div class="modal-overlay" id="goalModal" role="dialog" aria-modal="true" aria-labelledby="goalModalTitle">
     <div class="modal">
       <div class="modal-header">
-        <h2>Create Goal</h2>
-        <button class="modal-close" id="closeGoalModal">&times;</button>
+        <h2 id="goalModalTitle">Create Goal</h2>
+        <button class="modal-close" id="closeGoalModal" aria-label="Close dialog">&times;</button>
       </div>
       <div class="modal-body">
         <div class="form-group">
@@ -308,16 +492,14 @@
     </div>
   </div>
 
-  <div class="modal-overlay" id="deleteSiteModal">
+  <div class="modal-overlay" id="deleteSiteModal" role="alertdialog" aria-modal="true" aria-labelledby="deleteSiteModalTitle">
     <div class="modal">
       <div class="modal-header">
-        <h2>Delete Site</h2>
-        <button class="modal-close" id="closeDeleteModal">&times;</button>
+        <h2 id="deleteSiteModalTitle">Delete Site</h2>
+        <button class="modal-close" id="closeDeleteModal" aria-label="Close dialog">&times;</button>
       </div>
       <div class="modal-body">
-        <p style="color:var(--text-secondary);font-size:0.88rem;">
-          This action is irreversible. All analytics data for this site will be permanently removed.
-        </p>
+        <p class="text-secondary">This action is irreversible. All analytics data for this site will be permanently removed.</p>
         <div class="form-group">
           <label for="deleteConfirm">Type the site domain to confirm</label>
           <input type="text" id="deleteConfirm" placeholder="example.com" class="form-input">
@@ -330,11 +512,11 @@
     </div>
   </div>
 
-  <div class="modal-overlay" id="exportModal">
+  <div class="modal-overlay" id="exportModal" role="dialog" aria-modal="true" aria-labelledby="exportModalTitle">
     <div class="modal">
       <div class="modal-header">
-        <h2>Export Data</h2>
-        <button class="modal-close" id="closeExportModal">&times;</button>
+        <h2 id="exportModalTitle">Export Data</h2>
+        <button class="modal-close" id="closeExportModal" aria-label="Close dialog">&times;</button>
       </div>
       <div class="modal-body">
         <div class="form-group">
@@ -355,19 +537,11 @@
         </div>
         <div class="form-group">
           <label>Include Sections</label>
-          <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px;">
-            <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;color:var(--text-secondary);cursor:pointer;">
-              <input type="checkbox" checked> Pageviews &amp; Visitors
-            </label>
-            <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;color:var(--text-secondary);cursor:pointer;">
-              <input type="checkbox" checked> Traffic Sources
-            </label>
-            <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;color:var(--text-secondary);cursor:pointer;">
-              <input type="checkbox" checked> Devices &amp; Browsers
-            </label>
-            <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;color:var(--text-secondary);cursor:pointer;">
-              <input type="checkbox"> Countries
-            </label>
+          <div class="checkbox-group">
+            <label class="checkbox-label"><input type="checkbox" checked> Pageviews &amp; Visitors</label>
+            <label class="checkbox-label"><input type="checkbox" checked> Traffic Sources</label>
+            <label class="checkbox-label"><input type="checkbox" checked> Devices &amp; Browsers</label>
+            <label class="checkbox-label"><input type="checkbox"> Countries</label>
           </div>
         </div>
       </div>
@@ -378,11 +552,11 @@
     </div>
   </div>
 
-  <div class="modal-overlay" id="webhookModal">
+  <div class="modal-overlay" id="webhookModal" role="dialog" aria-modal="true" aria-labelledby="webhookModalTitle">
     <div class="modal">
       <div class="modal-header">
         <h2 id="webhookModalTitle">Add Webhook</h2>
-        <button class="modal-close" id="closeWebhookModal">&times;</button>
+        <button class="modal-close" id="closeWebhookModal" aria-label="Close dialog">&times;</button>
       </div>
       <div class="modal-body">
         <div class="form-group">
@@ -414,8 +588,50 @@
     </div>
   </div>
 
-  <div class="toast-container" id="toastContainer"></div>
-  <div class="sidebar-overlay" id="sidebarOverlay"></div>
+  <!-- Toast Container -->
+  <div class="toast-container" id="toastContainer" role="log" aria-live="polite" aria-relevant="additions"></div>
+
+  <!-- Sidebar Overlay (Mobile) -->
+  <div class="sidebar-overlay" id="sidebarOverlay" aria-hidden="true"></div>
+
+  <!-- Error Boundary -->
+  <div class="error-boundary" id="errorBoundary" style="display:none" role="alert">
+    <div class="error-boundary-content">
+      <div class="error-boundary-icon">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      </div>
+      <h2>Something went wrong</h2>
+      <p>An unexpected error occurred. Please try again.</p>
+      <div class="error-boundary-actions">
+        <button class="btn btn-primary" id="errorRetryBtn">Try Again</button>
+        <button class="btn btn-secondary" id="errorReportBtn">Report Issue</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Keyboard Shortcuts Help -->
+  <div class="shortcuts-overlay" id="shortcutsOverlay" style="display:none" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+    <div class="shortcuts-modal">
+      <div class="modal-header">
+        <h2>Keyboard Shortcuts</h2>
+        <button class="modal-close" id="closeShortcuts" aria-label="Close shortcuts">&times;</button>
+      </div>
+      <div class="shortcuts-grid">
+        <div class="shortcut-item"><kbd>?</kbd><span>Show shortcuts</span></div>
+        <div class="shortcut-item"><kbd>G</kbd> then <kbd>D</kbd><span>Go to Dashboard</span></div>
+        <div class="shortcut-item"><kbd>G</kbd> then <kbd>R</kbd><span>Go to Real-time</span></div>
+        <div class="shortcut-item"><kbd>G</kbd> then <kbd>S</kbd><span>Go to Settings</span></div>
+        <div class="shortcut-item"><kbd>G</kbd> then <kbd>P</kbd><span>Go to Profile</span></div>
+        <div class="shortcut-item"><kbd>G</kbd> then <kbd>A</kbd><span>Go to Admin</span></div>
+        <div class="shortcut-item"><kbd>R</kbd><span>Refresh data</span></div>
+        <div class="shortcut-item"><kbd>P</kbd><span>Print report</span></div>
+        <div class="shortcut-item"><kbd>/</kbd><span>Focus search</span></div>
+        <div class="shortcut-item"><kbd>Esc</kbd><span>Close dialog / menu</span></div>
+        <div class="shortcut-item"><kbd>1</kbd>-<kbd>9</kbd><span>Switch sections</span></div>
+        <div class="shortcut-item"><kbd>D</kbd><span>Toggle dark mode</span></div>
+      </div>
+    </div>
+  </div>
 
   <script src="/static/app.js"></script>
 </body>

@@ -1,0 +1,14 @@
+version: '3.8'
+services:
+  ghostly:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - GHOSTLY_SECRET_KEY=change-me-in-production
+      - GHOSTLY_DB_PATH=/app/data/ghostly.db
+      - GHOSTLY_ADMIN_EMAIL=admin@ghostly.local
+      - GHOSTLY_ADMIN_PASSWORD=admin123
+    restart: unless-stopped

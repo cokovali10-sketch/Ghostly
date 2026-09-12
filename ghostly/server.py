@@ -4,11 +4,13 @@ import argparse
 import asyncio
 import logging
 import sys
+import time
 from pathlib import Path
 
 from aiohttp import web
 
 from ghostly.api.routes import routes as api_routes
+from ghostly.core.auth import AuthManager
 from ghostly.core.database import Database
 from ghostly.core.plugins import PluginManager
 from ghostly.core.themes import ThemeManager
@@ -38,9 +40,13 @@ async def cors_middleware(request: web.Request, handler):
             response = exc
 
     origin = request.headers.get("Origin", "*")
+    allowed_origins = request.app.get("cors_origins", ["*"])
+    if allowed_origins != ["*"] and origin not in allowed_origins:
+        origin = allowed_origins[0] if allowed_origins else ""
+
     response.headers["Access-Control-Allow-Origin"] = origin
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, X-API-Key"
     response.headers["Access-Control-Allow-Credentials"] = "true"
     response.headers["Access-Control-Max-Age"] = "86400"
     return response
@@ -59,7 +65,86 @@ async def security_middleware(request: web.Request, handler):
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("X-XSS-Protection", "1; mode=block")
+    response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    response.headers.setdefault("Cache-Control", "no-store, no-cache, must-revalidate")
+    response.headers.setdefault("Pragma", "no-cache")
     return response
+
+
+# ── Request logging middleware ───────────────────────────────────────────
+
+
+@web.middleware
+async def logging_middleware(request: web.Request, handler):
+    method = request.method
+    path = request.path
+    start = time.monotonic()
+
+    skip_logging = path.startswith("/api/track") or path == "/health" or path.startswith("/static/")
+    if not skip_logging:
+        logger.info("%s %s", method, path)
+
+    try:
+        response = await handler(request)
+    except web.HTTPException:
+        raise
+    except Exception as exc:
+        elapsed = (time.monotonic() - start) * 1000
+        logger.error("Unhandled error on %s %s (%.1fms): %s", method, path, elapsed, exc)
+        raise
+
+    elapsed = (time.monotonic() - start) * 1000
+    if not skip_logging:
+        logger.info("%s %s -> %d (%.1fms)", method, path, response.status, elapsed)
+
+    return response
+
+
+# ── Rate limiting middleware ─────────────────────────────────────────────
+
+
+@web.middleware
+async def rate_limit_middleware(request: web.Request, handler):
+    if request.path.startswith("/api/track") or request.path == "/health":
+        return await handler(request)
+
+    ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or request.remote or "0.0.0.0"
+
+    auth: AuthManager | None = request.app.get("auth")
+    if auth:
+        allowed = await auth.check_ip_rate_limit(ip, limit=200)
+        if not allowed:
+            logger.warning("Rate limit exceeded for IP %s", ip)
+            return web.json_response(
+                {"error": "Rate limit exceeded. Please try again later."},
+                status=429,
+                headers={"Retry-After": "60"},
+            )
+
+    return await handler(request)
+
+
+# ── Error handling middleware ────────────────────────────────────────────
+
+
+@web.middleware
+async def error_middleware(request: web.Request, handler):
+    try:
+        return await handler(request)
+    except web.HTTPException as exc:
+        return web.json_response(
+            {"error": exc.reason or "Internal Server Error"},
+            status=exc.status,
+        )
+    except Exception as exc:
+        logger.error("Unhandled error on %s %s: %s", request.method, request.path, exc)
+        return web.json_response(
+            {"error": "Internal server error"},
+            status=500,
+        )
+
+
+# ── Theme middleware ─────────────────────────────────────────────────────
 
 
 @web.middleware
@@ -85,24 +170,6 @@ async def theme_middleware(request: web.Request, handler):
                 except Exception:
                     pass
     return response
-
-
-# ── Request logging middleware ───────────────────────────────────────────
-
-
-@web.middleware
-async def logging_middleware(request: web.Request, handler):
-    method = request.method
-    path = request.path
-    if path.startswith("/api/") and path != "/api/track":
-        logger.info("%s %s", method, path)
-    try:
-        return await handler(request)
-    except web.HTTPException:
-        raise
-    except Exception as exc:
-        logger.error("Unhandled error on %s %s: %s", method, path, exc)
-        raise
 
 
 # ── Template rendering ──────────────────────────────────────────────────
@@ -139,6 +206,41 @@ async def dashboard_site(request: web.Request) -> web.Response:
         return web.Response(text="<h1>Site dashboard not configured</h1>", status=501, content_type="text/html")
 
 
+# ── Health check handler ────────────────────────────────────────────────
+
+
+async def health_check(request: web.Request) -> web.Response:
+    db: Database = request.app["db"]
+    try:
+        await db.db.execute("SELECT 1")
+        db_status = "connected"
+    except Exception:
+        db_status = "disconnected"
+
+    auth: AuthManager | None = request.app.get("auth")
+    auth_status = "ready" if auth else "not_configured"
+
+    ws_manager: WebSocketManager = request.app.get("ws_manager")
+    ws_status = "running" if ws_manager else "not_configured"
+
+    all_ok = db_status == "connected" and auth_status == "ready"
+    status_code = 200 if all_ok else 503
+
+    return web.json_response(
+        {
+            "status": "ok" if all_ok else "degraded",
+            "service": "ghostly",
+            "components": {
+                "database": db_status,
+                "auth": auth_status,
+                "websocket": ws_status,
+            },
+            "timestamp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+        },
+        status=status_code,
+    )
+
+
 # ── Application factory ─────────────────────────────────────────────────
 
 
@@ -147,6 +249,11 @@ async def on_startup(app: web.Application) -> None:
     await db.connect()
     await db.init_db()
     logger.info("Database connected and initialised at %s", db.db_path)
+
+    secret_key = app.get("secret_key")
+    auth = AuthManager(db, secret_key=secret_key)
+    app["auth"] = auth
+    logger.info("Auth manager initialised")
 
     ws_manager: WebSocketManager = app["ws_manager"]
     await ws_manager.start()
@@ -171,8 +278,19 @@ async def on_cleanup(app: web.Application) -> None:
     logger.info("Database connection closed")
 
 
-def create_app(db_path: str | Path | None = None) -> web.Application:
-    middlewares = [cors_middleware, security_middleware, theme_middleware, logging_middleware]
+def create_app(
+    db_path: str | Path | None = None,
+    cors_origins: list[str] | None = None,
+    secret_key: str | None = None,
+) -> web.Application:
+    middlewares = [
+        error_middleware,
+        rate_limit_middleware,
+        cors_middleware,
+        security_middleware,
+        logging_middleware,
+        theme_middleware,
+    ]
 
     app = web.Application(middlewares=middlewares)
 
@@ -180,6 +298,9 @@ def create_app(db_path: str | Path | None = None) -> web.Application:
         app["db"] = Database(db_path)
     else:
         app["db"] = Database()
+
+    app["cors_origins"] = cors_origins or ["*"]
+    app["secret_key"] = secret_key
 
     ws_manager = WebSocketManager()
     app["ws_manager"] = ws_manager
@@ -198,6 +319,8 @@ def create_app(db_path: str | Path | None = None) -> web.Application:
     app.router.add_get("/dashboard/", dashboard_index)
     app.router.add_get("/dashboard/site/{id}", dashboard_site)
     app.router.add_get("/dashboard/site/{id}/", dashboard_site)
+
+    app.router.add_get("/health", health_check)
 
     app.router.add_get("/ws/{site_id}", ws_handler.handle_connection)
 
@@ -228,6 +351,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Path to SQLite database file (default: ghostly_data.db)",
     )
     parser.add_argument(
+        "--secret-key", default=None,
+        help="Secret key for JWT tokens (default: auto-generated)",
+    )
+    parser.add_argument(
+        "--cors-origins", default="*",
+        help="Comma-separated CORS origins (default: *)",
+    )
+    parser.add_argument(
         "--log-level", default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="Logging level (default: INFO)",
@@ -245,7 +376,13 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     db_path = Path(args.db) if args.db else None
-    app = create_app(db_path=db_path)
+    cors_origins = [o.strip() for o in args.cors_origins.split(",")] if args.cors_origins else ["*"]
+
+    app = create_app(
+        db_path=db_path,
+        cors_origins=cors_origins,
+        secret_key=args.secret_key,
+    )
 
     logger.info("Starting Ghostly server on %s:%s", args.host, args.port)
 
