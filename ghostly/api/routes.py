@@ -11,7 +11,12 @@ from urllib.parse import urlparse
 import aiosqlite
 from aiohttp import web
 
+from ghostly.core.alerts import AlertManager
+from ghostly.core.auth import AuthManager
 from ghostly.core.database import Database
+from ghostly.core.export import ExportManager
+from ghostly.core.funnels import FunnelManager
+from ghostly.core.goals import GoalManager
 
 logger = logging.getLogger("ghostly.api")
 
@@ -461,3 +466,541 @@ async def site_retention(request: web.Request) -> web.Response:
 
     retention = await db.get_retention(site_id, days=days)
     return _json_response({"retention": retention, "period_days": days})
+
+
+# ── API Keys ────────────────────────────────────────────────────────────
+
+
+@routes.get("/api/sites/{id}/api-keys")
+async def list_api_keys(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    auth = AuthManager(db)
+    keys = await auth.get_api_keys(site_id)
+    return _json_response({"api_keys": keys})
+
+
+@routes.post("/api/sites/{id}/api-keys")
+async def create_api_key(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    name = (body.get("name") or "unnamed").strip()
+    permissions = body.get("permissions", ["read"])
+    rate_limit = body.get("rate_limit", 1000)
+    expires_in_days = body.get("expires_in_days")
+
+    auth = AuthManager(db)
+    key_data = await auth.create_api_key(
+        site_id=site_id,
+        name=name,
+        permissions=permissions,
+        rate_limit=rate_limit,
+        expires_in_days=expires_in_days,
+    )
+    return _json_response(key_data, status=201)
+
+
+@routes.delete("/api/api-keys/{id}")
+async def delete_api_key(request: web.Request) -> web.Response:
+    key_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    auth = AuthManager(db)
+    deleted = await auth.revoke_api_key(key_id)
+    if not deleted:
+        return _error("API key not found", status=404)
+    return _json_response({"ok": True})
+
+
+@routes.get("/api/api-keys/{id}")
+async def get_api_key(request: web.Request) -> web.Response:
+    key_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    auth = AuthManager(db)
+    key = await auth.get_api_key(key_id)
+    if not key:
+        return _error("API key not found", status=404)
+    return _json_response(key)
+
+
+# ── Alerts ──────────────────────────────────────────────────────────────
+
+
+@routes.get("/api/sites/{id}/alerts")
+async def list_alerts(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    alert_mgr = AlertManager(db)
+    alerts = await alert_mgr.get_alerts(site_id)
+    return _json_response({"alerts": alerts})
+
+
+@routes.post("/api/sites/{id}/alerts")
+async def create_alert(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    name = (body.get("name") or "").strip()
+    alert_type = (body.get("alert_type") or "").strip()
+    threshold = body.get("threshold", 0)
+    window_minutes = body.get("window_minutes", 5)
+    cooldown_minutes = body.get("cooldown_minutes", 30)
+    metadata = body.get("metadata", {})
+
+    if not name:
+        return _error("Missing 'name' field")
+    if not alert_type:
+        return _error("Missing 'alert_type' field")
+
+    alert_mgr = AlertManager(db)
+    try:
+        alert = await alert_mgr.create_alert(
+            site_id=site_id,
+            name=name,
+            alert_type=alert_type,
+            threshold=threshold,
+            window_minutes=window_minutes,
+            cooldown_minutes=cooldown_minutes,
+            metadata=metadata,
+        )
+    except ValueError as exc:
+        return _error(str(exc))
+
+    return _json_response(alert, status=201)
+
+
+@routes.get("/api/alerts/{id}")
+async def get_alert(request: web.Request) -> web.Response:
+    alert_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    alert_mgr = AlertManager(db)
+    alert = await alert_mgr.get_alert(alert_id)
+    if not alert:
+        return _error("Alert not found", status=404)
+    return _json_response(alert)
+
+
+@routes.patch("/api/alerts/{id}")
+async def update_alert(request: web.Request) -> web.Response:
+    alert_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    alert_mgr = AlertManager(db)
+    alert = await alert_mgr.get_alert(alert_id)
+    if not alert:
+        return _error("Alert not found", status=404)
+
+    updates = {}
+    for key in ("name", "threshold", "window_minutes", "cooldown_minutes", "status", "metadata"):
+        if key in body:
+            updates[key] = body[key]
+
+    if updates:
+        await db.db.execute(
+            "UPDATE alerts SET " + ", ".join(f"{k}=?" for k in updates) + " WHERE id=?",
+            list(updates.values()) + [alert_id],
+        )
+        await db.db.commit()
+
+    updated = await alert_mgr.get_alert(alert_id)
+    return _json_response(updated)
+
+
+@routes.delete("/api/alerts/{id}")
+async def delete_alert(request: web.Request) -> web.Response:
+    alert_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    alert_mgr = AlertManager(db)
+    deleted = await alert_mgr.delete_alert(alert_id)
+    if not deleted:
+        return _error("Alert not found", status=404)
+    return _json_response({"ok": True})
+
+
+@routes.get("/api/sites/{id}/alerts/history")
+async def alert_history(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+    limit = _parse_limit(request, default=50)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    alert_mgr = AlertManager(db)
+    history = await alert_mgr.get_alert_history(site_id, limit=limit)
+    return _json_response({"history": history})
+
+
+# ── Funnels ─────────────────────────────────────────────────────────────
+
+
+@routes.get("/api/sites/{id}/funnels")
+async def list_funnels(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    funnel_mgr = FunnelManager(db)
+    funnels = await funnel_mgr.get_funnels(site_id)
+    return _json_response({"funnels": funnels})
+
+
+@routes.post("/api/sites/{id}/funnels")
+async def create_funnel(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    name = (body.get("name") or "").strip()
+    description = (body.get("description") or "").strip()
+    steps = body.get("steps", [])
+
+    if not name:
+        return _error("Missing 'name' field")
+    if not steps:
+        return _error("Missing 'steps' array")
+
+    funnel_mgr = FunnelManager(db)
+    funnel = await funnel_mgr.create_funnel(
+        site_id=site_id,
+        name=name,
+        steps=steps,
+        description=description,
+    )
+    return _json_response(funnel, status=201)
+
+
+@routes.get("/api/funnels/{id}")
+async def get_funnel(request: web.Request) -> web.Response:
+    funnel_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    funnel_mgr = FunnelManager(db)
+    funnel = await funnel_mgr.get_funnel(funnel_id)
+    if not funnel:
+        return _error("Funnel not found", status=404)
+    return _json_response(funnel)
+
+
+@routes.get("/api/funnels/{id}/stats")
+async def funnel_stats(request: web.Request) -> web.Response:
+    funnel_id = int(request.match_info["id"])
+    db = _get_db(request)
+    days = _parse_days(request)
+
+    funnel_mgr = FunnelManager(db)
+    try:
+        stats = await funnel_mgr.get_funnel_stats(funnel_id, days=days)
+    except ValueError as exc:
+        return _error(str(exc), status=404)
+    return _json_response(stats)
+
+
+@routes.delete("/api/funnels/{id}")
+async def delete_funnel(request: web.Request) -> web.Response:
+    funnel_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    funnel_mgr = FunnelManager(db)
+    deleted = await funnel_mgr.delete_funnel(funnel_id)
+    if not deleted:
+        return _error("Funnel not found", status=404)
+    return _json_response({"ok": True})
+
+
+# ── Goals ───────────────────────────────────────────────────────────────
+
+
+@routes.get("/api/sites/{id}/goals")
+async def list_goals(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    goal_mgr = GoalManager(db)
+    goals = await goal_mgr.get_goals(site_id)
+    return _json_response({"goals": goals})
+
+
+@routes.post("/api/sites/{id}/goals")
+async def create_goal(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    name = (body.get("name") or "").strip()
+    goal_type = (body.get("goal_type") or "pageview").strip()
+    url_pattern = (body.get("url_pattern") or "").strip()
+    match_type = (body.get("match_type") or "prefix").strip()
+
+    if not name:
+        return _error("Missing 'name' field")
+
+    goal_mgr = GoalManager(db)
+    try:
+        goal = await goal_mgr.create_goal(
+            site_id=site_id,
+            name=name,
+            goal_type=goal_type,
+            url_pattern=url_pattern,
+            match_type=match_type,
+        )
+    except ValueError as exc:
+        return _error(str(exc))
+
+    return _json_response(goal, status=201)
+
+
+@routes.get("/api/goals/{id}")
+async def get_goal(request: web.Request) -> web.Response:
+    goal_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    goal_mgr = GoalManager(db)
+    goal = await goal_mgr.get_goal(goal_id)
+    if not goal:
+        return _error("Goal not found", status=404)
+    return _json_response(goal)
+
+
+@routes.get("/api/goals/{id}/stats")
+async def goal_stats(request: web.Request) -> web.Response:
+    goal_id = int(request.match_info["id"])
+    db = _get_db(request)
+    days = _parse_days(request)
+
+    goal_mgr = GoalManager(db)
+    try:
+        stats = await goal_mgr.get_goal_stats(goal_id, days=days)
+    except ValueError as exc:
+        return _error(str(exc), status=404)
+    return _json_response(stats)
+
+
+@routes.delete("/api/goals/{id}")
+async def delete_goal(request: web.Request) -> web.Response:
+    goal_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    goal_mgr = GoalManager(db)
+    deleted = await goal_mgr.delete_goal(goal_id)
+    if not deleted:
+        return _error("Goal not found", status=404)
+    return _json_response({"ok": True})
+
+
+# ── Export ──────────────────────────────────────────────────────────────
+
+
+@routes.get("/api/sites/{id}/export")
+async def export_data(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+    format = request.query.get("format", "json")
+    start_date = request.query.get("start_date")
+    end_date = request.query.get("end_date")
+    data_types_raw = request.query.get("data_types", "pageviews,visitors,sessions,events")
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    if format not in ("json", "csv", "html"):
+        return _error("Invalid format. Must be json, csv, or html")
+
+    data_types = [dt.strip() for dt in data_types_raw.split(",") if dt.strip()]
+
+    export_mgr = ExportManager(db)
+    try:
+        result = await export_mgr.export_site_data(
+            site_id=site_id,
+            format=format,
+            start_date=start_date,
+            end_date=end_date,
+            data_types=data_types,
+        )
+    except ValueError as exc:
+        return _error(str(exc), status=404)
+
+    await export_mgr.log_export(site_id, format, data_types)
+
+    return web.Response(
+        text=result["content"],
+        content_type=result["content_type"],
+        headers={
+            "Content-Disposition": f'attachment; filename="{result["filename"]}"',
+        },
+    )
+
+
+@routes.get("/api/sites/{id}/export/history")
+async def export_history(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    export_mgr = ExportManager(db)
+    history = await export_mgr.get_export_history(site_id)
+    return _json_response({"history": history})
+
+
+# ── Dashboard ───────────────────────────────────────────────────────────
+
+
+@routes.get("/api/sites/{id}/dashboard")
+async def site_dashboard(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+    days = _parse_days(request)
+
+    site = await db._fetch_one("SELECT id, domain, name FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    from ghostly.core.aggregator import Aggregator
+    aggregator = Aggregator(db)
+    dashboard = await aggregator.get_dashboard(site_id, days)
+
+    goal_mgr = GoalManager(db)
+    goals = await goal_mgr.get_all_goals_stats(site_id, days)
+
+    funnel_mgr = FunnelManager(db)
+    funnels_raw = await funnel_mgr.get_funnels(site_id)
+    funnels = []
+    for f in funnels_raw:
+        try:
+            fstats = await funnel_mgr.get_funnel_stats(f["id"], days)
+            funnels.append(fstats)
+        except ValueError:
+            continue
+
+    return _json_response({
+        "site": dict(site),
+        "period_days": days,
+        "dashboard": dashboard,
+        "goals": goals,
+        "funnels": funnels,
+    })
+
+
+# ── Webhooks ────────────────────────────────────────────────────────────
+
+
+@routes.get("/api/sites/{id}/webhooks")
+async def list_webhooks(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    webhooks = await db.get_webhooks(site_id)
+    return _json_response({"webhooks": webhooks})
+
+
+@routes.post("/api/sites/{id}/webhooks")
+async def create_webhook(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    name = (body.get("name") or "").strip()
+    url = (body.get("url") or "").strip()
+    events = body.get("events", ["pageview"])
+    secret = (body.get("secret") or "").strip()
+
+    if not url:
+        return _error("Missing 'url' field")
+
+    webhook_id = await db.create_webhook(
+        site_id=site_id,
+        name=name,
+        url=url,
+        events=json.dumps(events) if isinstance(events, list) else events,
+        secret=secret,
+    )
+
+    return _json_response({"id": webhook_id, "ok": True}, status=201)
+
+
+@routes.delete("/api/webhooks/{id}")
+async def delete_webhook(request: web.Request) -> web.Response:
+    webhook_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    deleted = await db.delete_webhook(webhook_id)
+    if not deleted:
+        return _error("Webhook not found", status=404)
+    return _json_response({"ok": True})

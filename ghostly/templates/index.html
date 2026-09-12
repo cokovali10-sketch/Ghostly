@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Ghostly Analytics</title>
   <link rel="stylesheet" href="/static/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
 <body>
@@ -12,33 +14,93 @@
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-header">
         <div class="logo">
-          <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 2C6.48 2 2 6.48 2 12c0 3.3 1.6 6.2 4 8v2c0 .55.45 1 1 1h8c.55 0 1-.45 1-1v-2c2.4-1.8 4-4.7 4-8 0-5.52-4.48-10-10-10z"/>
-            <path d="M10 15l-2-2m0 0l2-2m-2 2h6m-3-2v4" stroke-linecap="round"/>
-          </svg>
-          <span class="logo-text">Ghostly</span>
+          <div class="logo-icon-wrap">
+            <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2C6.48 2 2 6.48 2 12c0 3.3 1.6 6.2 4 8v2c0 .55.45 1 1 1h8c.55 0 1-.45 1-1v-2c2.4-1.8 4-4.7 4-8 0-5.52-4.48-10-10-10z"/>
+              <path d="M10 15l-2-2m0 0l2-2m-2 2h6m-3-2v4" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div class="logo-text-wrap">
+            <span class="logo-text">Ghostly</span>
+            <span class="logo-version">v2.0</span>
+          </div>
         </div>
+        <button class="sidebar-close" id="sidebarClose">&times;</button>
       </div>
 
-      <div class="sidebar-section">
-        <div class="sidebar-label">SITES</div>
+      <nav class="sidebar-nav" id="sidebarNav">
+        <div class="nav-section">
+          <div class="nav-label">Analytics</div>
+          <a href="#dashboard" class="nav-item active" data-section="dashboard">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            <span>Dashboard</span>
+          </a>
+          <a href="#realtime" class="nav-item" data-section="realtime">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <span>Real-time</span>
+            <span class="nav-badge" id="navActiveCount">0</span>
+          </a>
+          <a href="#pages" class="nav-item" data-section="pages">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <span>Pages</span>
+          </a>
+          <a href="#referrers" class="nav-item" data-section="referrers">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+            <span>Referrers</span>
+          </a>
+          <a href="#devices" class="nav-item" data-section="devices">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+            <span>Devices</span>
+          </a>
+          <a href="#countries" class="nav-item" data-section="countries">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+            <span>Countries</span>
+          </a>
+          <a href="#retention" class="nav-item" data-section="retention">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+            <span>Retention</span>
+          </a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-label">Growth</div>
+          <a href="#funnels" class="nav-item" data-section="funnels">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+            <span>Funnels</span>
+          </a>
+          <a href="#goals" class="nav-item" data-section="goals">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+            <span>Goals</span>
+          </a>
+          <a href="#alerts" class="nav-item" data-section="alerts">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+            <span>Alerts</span>
+          </a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-label">Manage</div>
+          <a href="#settings" class="nav-item" data-section="settings">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+            <span>Settings</span>
+          </a>
+        </div>
+      </nav>
+
+      <div class="sidebar-sites">
+        <div class="nav-label">Sites</div>
         <ul class="sites-list" id="sitesList">
           <li class="site-item active" data-site-id="all">
-            <span class="site-dot" style="background:#00d4ff"></span>
+            <span class="site-dot" style="background:var(--cyan)"></span>
             All Sites
           </li>
         </ul>
         <button class="add-site-btn" id="addSiteBtn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-          </svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           Add Site
         </button>
       </div>
 
-      <div class="sidebar-section">
-        <div class="sidebar-label">TIME RANGE</div>
-        <div class="date-range-picker">
+      <div class="sidebar-footer">
+        <div class="range-picker">
           <select id="dateRange" class="range-select">
             <option value="24h">Last 24 hours</option>
             <option value="7d" selected>Last 7 days</option>
@@ -46,193 +108,37 @@
             <option value="90d">Last 90 days</option>
           </select>
         </div>
-      </div>
-
-      <div class="sidebar-section">
-        <div class="sidebar-label">QUICK STATS</div>
-        <div class="sidebar-stats">
-          <div class="sidebar-stat">
-            <span class="stat-label">Uptime</span>
-            <span class="stat-value" id="uptime">99.9%</span>
-          </div>
-          <div class="sidebar-stat">
-            <span class="stat-label">Events today</span>
-            <span class="stat-value" id="eventsToday">--</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="sidebar-footer">
         <div class="privacy-badge">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#00ff88" stroke-width="2">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-          </svg>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
           <span>Privacy-First Analytics</span>
         </div>
       </div>
     </aside>
 
-    <main class="main">
+    <main class="main" id="main">
       <header class="topbar">
         <button class="menu-toggle" id="menuToggle">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>
-          </svg>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
         </button>
         <div class="topbar-title">
-          <h1 id="siteName">All Sites</h1>
+          <h1 id="pageTitle">Dashboard</h1>
           <span class="topbar-subtitle" id="dateRangeLabel">Last 7 days</span>
         </div>
         <div class="topbar-actions">
           <div class="realtime-badge" id="realtimeBadge">
             <span class="pulse-dot"></span>
-            <span id="activeNowCount">0</span> active now
+            <span id="activeNowCount">0</span> active
           </div>
-          <button class="refresh-btn" id="refreshBtn" title="Refresh data">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
-              <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
-            </svg>
+          <button class="btn-icon" id="refreshBtn" title="Refresh">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
           </button>
         </div>
       </header>
 
-      <div class="dashboard" id="dashboard">
-        <div class="stats-grid">
-          <div class="stat-card">
-            <div class="stat-card-icon icon-views">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
-              </svg>
-            </div>
-            <div class="stat-card-content">
-              <span class="stat-card-label">Total Views</span>
-              <span class="stat-card-value" id="totalViews">--</span>
-              <span class="stat-card-change positive" id="totalViewsChange"></span>
-            </div>
-          </div>
-
-          <div class="stat-card">
-            <div class="stat-card-icon icon-visitors">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/>
-                <path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/>
-              </svg>
-            </div>
-            <div class="stat-card-content">
-              <span class="stat-card-label">Unique Visitors</span>
-              <span class="stat-card-value" id="uniqueVisitors">--</span>
-              <span class="stat-card-change positive" id="uniqueVisitorsChange"></span>
-            </div>
-          </div>
-
-          <div class="stat-card">
-            <div class="stat-card-icon icon-active">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-              </svg>
-            </div>
-            <div class="stat-card-content">
-              <span class="stat-card-label">Active Now</span>
-              <span class="stat-card-value" id="activeNow">--</span>
-              <span class="stat-card-change neutral">Real-time</span>
-            </div>
-          </div>
-
-          <div class="stat-card">
-            <div class="stat-card-icon icon-time">
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 8 10"/>
-              </svg>
-            </div>
-            <div class="stat-card-content">
-              <span class="stat-card-label">Avg. Time</span>
-              <span class="stat-card-value" id="avgTime">--</span>
-              <span class="stat-card-change positive" id="avgTimeChange"></span>
-            </div>
-          </div>
-        </div>
-
-        <div class="charts-grid">
-          <div class="chart-card wide">
-            <div class="chart-card-header">
-              <h3>Views Over Time</h3>
-              <div class="chart-legend" id="viewsLegend"></div>
-            </div>
-            <div class="chart-container chart-tall">
-              <canvas id="viewsChart"></canvas>
-            </div>
-          </div>
-
-          <div class="chart-card">
-            <div class="chart-card-header">
-              <h3>Top Pages</h3>
-            </div>
-            <div class="chart-container">
-              <canvas id="pagesChart"></canvas>
-            </div>
-          </div>
-
-          <div class="chart-card">
-            <div class="chart-card-header">
-              <h3>Devices</h3>
-            </div>
-            <div class="chart-container chart-doughnut">
-              <canvas id="devicesChart"></canvas>
-            </div>
-          </div>
-
-          <div class="chart-card">
-            <div class="chart-card-header">
-              <h3>Countries</h3>
-            </div>
-            <div class="chart-container">
-              <canvas id="countriesChart"></canvas>
-            </div>
-          </div>
-
-          <div class="chart-card">
-            <div class="chart-card-header">
-              <h3>Referrers</h3>
-            </div>
-            <div class="chart-container">
-              <canvas id="referrersChart"></canvas>
-            </div>
-          </div>
-
-          <div class="chart-card">
-            <div class="chart-card-header">
-              <h3>Browsers</h3>
-            </div>
-            <div class="chart-container chart-doughnut">
-              <canvas id="browsersChart"></canvas>
-            </div>
-          </div>
-        </div>
-
-        <div class="table-card">
-          <div class="table-card-header">
-            <h3>Recent Pageviews</h3>
-            <span class="table-count" id="pageviewCount"></span>
-          </div>
-          <div class="table-wrapper">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Page</th>
-                  <th>Visitor</th>
-                  <th>Country</th>
-                  <th>Device</th>
-                  <th>Browser</th>
-                  <th>Referrer</th>
-                  <th>Time</th>
-                </tr>
-              </thead>
-              <tbody id="pageviewsTableBody">
-                <tr><td colspan="7" class="table-empty">Loading...</td></tr>
-              </tbody>
-            </table>
-          </div>
+      <div class="content" id="content">
+        <div class="loading-screen" id="loadingScreen">
+          <div class="spinner"></div>
+          <p>Loading analytics...</p>
         </div>
       </div>
     </main>
@@ -256,6 +162,7 @@
         <div class="tracking-snippet-box">
           <label>Tracking Snippet</label>
           <code id="trackingSnippet">&lt;script src="http://localhost:8080/static/tracking.js" data-domain="yourdomain.com"&gt;&lt;/script&gt;</code>
+          <button class="btn btn-sm" id="copySnippet">Copy</button>
         </div>
       </div>
       <div class="modal-footer">
@@ -264,6 +171,185 @@
       </div>
     </div>
   </div>
+
+  <div class="modal-overlay" id="alertModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Create Alert Rule</h2>
+        <button class="modal-close" id="closeAlertModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="alertName">Alert Name</label>
+          <input type="text" id="alertName" placeholder="e.g. High bounce rate" class="form-input">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="alertMetric">Metric</label>
+            <select id="alertMetric" class="form-input">
+              <option value="pageviews">Pageviews</option>
+              <option value="visitors">Visitors</option>
+              <option value="bounce_rate">Bounce Rate</option>
+              <option value="avg_duration">Avg Duration</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="alertCondition">Condition</label>
+            <select id="alertCondition" class="form-input">
+              <option value="gt">Greater than</option>
+              <option value="lt">Less than</option>
+              <option value="eq">Equals</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="alertThreshold">Threshold</label>
+          <input type="number" id="alertThreshold" placeholder="1000" class="form-input">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelAlertModal">Cancel</button>
+        <button class="btn btn-primary" id="confirmCreateAlert">Create Alert</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="funnelModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Create Funnel</h2>
+        <button class="modal-close" id="closeFunnelModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="funnelName">Funnel Name</label>
+          <input type="text" id="funnelName" placeholder="e.g. Onboarding Flow" class="form-input">
+        </div>
+        <div class="form-group">
+          <label for="funnelSteps">Page Paths (one per line)</label>
+          <textarea id="funnelSteps" rows="4" placeholder="/landing&#10;/signup&#10;/checkout" class="form-input form-textarea"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelFunnelModal">Cancel</button>
+        <button class="btn btn-primary" id="confirmCreateFunnel">Create Funnel</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="goalModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Create Goal</h2>
+        <button class="modal-close" id="closeGoalModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="goalName">Goal Name</label>
+          <input type="text" id="goalName" placeholder="e.g. 10K pageviews" class="form-input">
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="goalMetric">Metric</label>
+            <select id="goalMetric" class="form-input">
+              <option value="pageviews">Pageviews</option>
+              <option value="visitors">Visitors</option>
+              <option value="sessions">Sessions</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="goalTarget">Target Value</label>
+            <input type="number" id="goalTarget" placeholder="10000" class="form-input">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="goalPeriod">Time Period</label>
+          <select id="goalPeriod" class="form-input">
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly" selected>Monthly</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelGoalModal">Cancel</button>
+        <button class="btn btn-primary" id="confirmCreateGoal">Create Goal</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="deleteSiteModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Delete Site</h2>
+        <button class="modal-close" id="closeDeleteModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p style="color:var(--text-secondary);font-size:0.88rem;">
+          This action is irreversible. All analytics data for this site will be permanently removed.
+        </p>
+        <div class="form-group">
+          <label for="deleteConfirm">Type the site domain to confirm</label>
+          <input type="text" id="deleteConfirm" placeholder="example.com" class="form-input">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelDeleteModal">Cancel</button>
+        <button class="btn btn-danger" id="confirmDeleteSite">Delete Site</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="exportModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Export Data</h2>
+        <button class="modal-close" id="closeExportModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="exportFormat">Export Format</label>
+          <select id="exportFormat" class="form-input">
+            <option value="csv">CSV</option>
+            <option value="json">JSON</option>
+            <option value="xlsx">Excel (XLSX)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="exportRange">Date Range</label>
+          <select id="exportRange" class="form-input">
+            <option value="7d">Last 7 days</option>
+            <option value="30d" selected>Last 30 days</option>
+            <option value="90d">Last 90 days</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Include Sections</label>
+          <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px;">
+            <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;color:var(--text-secondary);cursor:pointer;">
+              <input type="checkbox" checked> Pageviews &amp; Visitors
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;color:var(--text-secondary);cursor:pointer;">
+              <input type="checkbox" checked> Traffic Sources
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;color:var(--text-secondary);cursor:pointer;">
+              <input type="checkbox" checked> Devices &amp; Browsers
+            </label>
+            <label style="display:flex;align-items:center;gap:8px;font-size:0.85rem;color:var(--text-secondary);cursor:pointer;">
+              <input type="checkbox"> Countries
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelExportModal">Cancel</button>
+        <button class="btn btn-primary" id="confirmExport">Export</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toastContainer"></div>
+  <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
   <script src="/static/app.js"></script>
 </body>

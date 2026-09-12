@@ -145,6 +145,114 @@ class Database:
                 UNIQUE(site_id, country)
             );
 
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                site_id     INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+                name        TEXT NOT NULL DEFAULT '',
+                key_hash    TEXT NOT NULL UNIQUE,
+                permissions TEXT NOT NULL DEFAULT '["read"]',
+                rate_limit  INTEGER NOT NULL DEFAULT 1000,
+                is_active   INTEGER NOT NULL DEFAULT 1,
+                last_used   TEXT,
+                expires_at  TEXT,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS alerts (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                site_id          INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+                name             TEXT NOT NULL,
+                alert_type       TEXT NOT NULL,
+                threshold        REAL NOT NULL,
+                window_minutes   INTEGER NOT NULL DEFAULT 5,
+                cooldown_minutes INTEGER NOT NULL DEFAULT 30,
+                status           TEXT NOT NULL DEFAULT 'active',
+                metadata         TEXT NOT NULL DEFAULT '{}',
+                last_triggered   TEXT,
+                created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS alert_history (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                alert_id      INTEGER NOT NULL REFERENCES alerts(id) ON DELETE CASCADE,
+                site_id       INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+                alert_type    TEXT NOT NULL,
+                current_value REAL NOT NULL,
+                threshold     REAL NOT NULL,
+                triggered_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS funnels (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                site_id      INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+                name         TEXT NOT NULL,
+                description  TEXT NOT NULL DEFAULT '',
+                steps_config TEXT NOT NULL DEFAULT '[]',
+                is_active    INTEGER NOT NULL DEFAULT 1,
+                created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS funnel_steps (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                funnel_id   INTEGER NOT NULL REFERENCES funnels(id) ON DELETE CASCADE,
+                step_order  INTEGER NOT NULL,
+                name        TEXT NOT NULL,
+                url_pattern TEXT NOT NULL DEFAULT '',
+                match_type  TEXT NOT NULL DEFAULT 'prefix'
+            );
+
+            CREATE TABLE IF NOT EXISTS funnel_completions (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                funnel_id   INTEGER NOT NULL REFERENCES funnels(id) ON DELETE CASCADE,
+                visitor_id  TEXT NOT NULL,
+                session_id  TEXT NOT NULL,
+                step_id     INTEGER NOT NULL REFERENCES funnel_steps(id) ON DELETE CASCADE,
+                step_order  INTEGER NOT NULL,
+                url         TEXT NOT NULL DEFAULT '',
+                created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS goals (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                site_id     INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+                name        TEXT NOT NULL,
+                goal_type   TEXT NOT NULL DEFAULT 'pageview',
+                url_pattern TEXT NOT NULL DEFAULT '',
+                match_type  TEXT NOT NULL DEFAULT 'prefix',
+                is_active   INTEGER NOT NULL DEFAULT 1,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS goal_completions (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                goal_id     INTEGER NOT NULL REFERENCES goals(id) ON DELETE CASCADE,
+                visitor_id  TEXT NOT NULL,
+                session_id  TEXT NOT NULL,
+                url         TEXT NOT NULL DEFAULT '',
+                completed_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS exports (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                site_id     INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+                format      TEXT NOT NULL DEFAULT 'json',
+                data_types  TEXT NOT NULL DEFAULT '[]',
+                created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS webhooks (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                site_id     INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+                name        TEXT NOT NULL DEFAULT '',
+                url         TEXT NOT NULL,
+                events      TEXT NOT NULL DEFAULT '["pageview"]',
+                is_active   INTEGER NOT NULL DEFAULT 1,
+                secret      TEXT NOT NULL DEFAULT '',
+                last_status INTEGER,
+                last_error  TEXT,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
             CREATE INDEX IF NOT EXISTS idx_pageviews_site_id ON pageviews(site_id);
             CREATE INDEX IF NOT EXISTS idx_pageviews_created_at ON pageviews(created_at);
             CREATE INDEX IF NOT EXISTS idx_pageviews_path ON pageviews(path);
@@ -155,6 +263,19 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_events_site_id ON events(site_id);
             CREATE INDEX IF NOT EXISTS idx_events_name ON events(name);
             CREATE INDEX IF NOT EXISTS idx_referrers_site_id ON referrers(site_id);
+            CREATE INDEX IF NOT EXISTS idx_api_keys_site_id ON api_keys(site_id);
+            CREATE INDEX IF NOT EXISTS idx_api_keys_key_hash ON api_keys(key_hash);
+            CREATE INDEX IF NOT EXISTS idx_alerts_site_id ON alerts(site_id);
+            CREATE INDEX IF NOT EXISTS idx_alert_history_site_id ON alert_history(site_id);
+            CREATE INDEX IF NOT EXISTS idx_alert_history_alert_id ON alert_history(alert_id);
+            CREATE INDEX IF NOT EXISTS idx_funnels_site_id ON funnels(site_id);
+            CREATE INDEX IF NOT EXISTS idx_funnel_steps_funnel_id ON funnel_steps(funnel_id);
+            CREATE INDEX IF NOT EXISTS idx_funnel_completions_funnel_id ON funnel_completions(funnel_id);
+            CREATE INDEX IF NOT EXISTS idx_funnel_completions_visitor_id ON funnel_completions(visitor_id);
+            CREATE INDEX IF NOT EXISTS idx_goals_site_id ON goals(site_id);
+            CREATE INDEX IF NOT EXISTS idx_goal_completions_goal_id ON goal_completions(goal_id);
+            CREATE INDEX IF NOT EXISTS idx_exports_site_id ON exports(site_id);
+            CREATE INDEX IF NOT EXISTS idx_webhooks_site_id ON webhooks(site_id);
         """)
 
     # ── inserts ──────────────────────────────────────────────────────────
@@ -367,4 +488,426 @@ class Database:
                FROM pageviews WHERE site_id=? AND (path LIKE ? OR title LIKE ?)
                GROUP BY path ORDER BY views DESC LIMIT ?""",
             (site_id, pattern, pattern, limit),
+        )
+
+    # ── API Keys CRUD ──────────────────────────────────────────────────────
+
+    async def create_api_key(
+        self,
+        site_id: int,
+        name: str,
+        key_hash: str,
+        permissions: str = '["read"]',
+        rate_limit: int = 1000,
+        expires_at: str | None = None,
+    ) -> int:
+        cursor = await self.db.execute(
+            """INSERT INTO api_keys (site_id, name, key_hash, permissions, rate_limit, expires_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (site_id, name, key_hash, permissions, rate_limit, expires_at),
+        )
+        await self.db.commit()
+        return cursor.lastrowid or 0
+
+    async def get_api_keys(self, site_id: int) -> list[dict[str, Any]]:
+        return await self._fetch_all(
+            """SELECT id, site_id, name, permissions, rate_limit, is_active,
+                      last_used, expires_at, created_at
+               FROM api_keys WHERE site_id=? ORDER BY created_at DESC""",
+            (site_id,),
+        )
+
+    async def get_api_key_by_hash(self, key_hash: str) -> dict[str, Any] | None:
+        return await self._fetch_one(
+            """SELECT id, site_id, name, permissions, rate_limit, is_active,
+                      last_used, expires_at, created_at
+               FROM api_keys WHERE key_hash=?""",
+            (key_hash,),
+        )
+
+    async def delete_api_key(self, key_id: int) -> bool:
+        result = await self.db.execute("DELETE FROM api_keys WHERE id=?", (key_id,))
+        await self.db.commit()
+        return result.rowcount > 0
+
+    # ── Alerts CRUD ────────────────────────────────────────────────────────
+
+    async def create_alert(
+        self,
+        site_id: int,
+        name: str,
+        alert_type: str,
+        threshold: float,
+        window_minutes: int = 5,
+        cooldown_minutes: int = 30,
+        metadata: str = "{}",
+    ) -> int:
+        cursor = await self.db.execute(
+            """INSERT INTO alerts (site_id, name, alert_type, threshold, window_minutes,
+                                   cooldown_minutes, metadata)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (site_id, name, alert_type, threshold, window_minutes, cooldown_minutes, metadata),
+        )
+        await self.db.commit()
+        return cursor.lastrowid or 0
+
+    async def get_alerts(self, site_id: int) -> list[dict[str, Any]]:
+        return await self._fetch_all(
+            """SELECT id, site_id, name, alert_type, threshold, window_minutes,
+                      cooldown_minutes, status, metadata, last_triggered, created_at
+               FROM alerts WHERE site_id=? ORDER BY created_at DESC""",
+            (site_id,),
+        )
+
+    async def get_alert(self, alert_id: int) -> dict[str, Any] | None:
+        return await self._fetch_one(
+            """SELECT id, site_id, name, alert_type, threshold, window_minutes,
+                      cooldown_minutes, status, metadata, last_triggered, created_at
+               FROM alerts WHERE id=?""",
+            (alert_id,),
+        )
+
+    async def update_alert(self, alert_id: int, **kwargs: Any) -> bool:
+        allowed = {"name", "threshold", "window_minutes", "cooldown_minutes", "status", "metadata"}
+        updates = {k: v for k, v in kwargs.items() if k in allowed}
+        if not updates:
+            return False
+        set_clause = ", ".join(f"{k}=?" for k in updates)
+        values = list(updates.values()) + [alert_id]
+        await self.db.execute(f"UPDATE alerts SET {set_clause} WHERE id=?", values)
+        await self.db.commit()
+        return True
+
+    async def delete_alert(self, alert_id: int) -> bool:
+        result = await self.db.execute("DELETE FROM alerts WHERE id=?", (alert_id,))
+        await self.db.commit()
+        return result.rowcount > 0
+
+    async def get_active_alerts(self, site_id: int) -> list[dict[str, Any]]:
+        return await self._fetch_all(
+            """SELECT id, site_id, name, alert_type, threshold, window_minutes,
+                      cooldown_minutes, status, metadata, last_triggered
+               FROM alerts WHERE site_id=? AND status IN ('active', 'triggered')""",
+            (site_id,),
+        )
+
+    async def log_alert_trigger(
+        self,
+        alert_id: int,
+        site_id: int,
+        alert_type: str,
+        current_value: float,
+        threshold: float,
+    ) -> int:
+        cursor = await self.db.execute(
+            """INSERT INTO alert_history (alert_id, site_id, alert_type, current_value, threshold)
+               VALUES (?, ?, ?, ?, ?)""",
+            (alert_id, site_id, alert_type, current_value, threshold),
+        )
+        await self.db.execute(
+            "UPDATE alerts SET last_triggered=datetime('now'), status='triggered' WHERE id=?",
+            (alert_id,),
+        )
+        await self.db.commit()
+        return cursor.lastrowid or 0
+
+    async def get_alert_history(self, site_id: int, limit: int = 50) -> list[dict[str, Any]]:
+        return await self._fetch_all(
+            """SELECT h.id, h.alert_id, a.name as alert_name, h.alert_type,
+                      h.current_value, h.threshold, h.triggered_at
+               FROM alert_history h
+               LEFT JOIN alerts a ON h.alert_id = a.id
+               WHERE h.site_id=?
+               ORDER BY h.triggered_at DESC LIMIT ?""",
+            (site_id, limit),
+        )
+
+    # ── Funnels CRUD ───────────────────────────────────────────────────────
+
+    async def create_funnel(
+        self,
+        site_id: int,
+        name: str,
+        description: str = "",
+        steps_config: str = "[]",
+    ) -> int:
+        cursor = await self.db.execute(
+            """INSERT INTO funnels (site_id, name, description, steps_config)
+               VALUES (?, ?, ?, ?)""",
+            (site_id, name, description, steps_config),
+        )
+        await self.db.commit()
+        return cursor.lastrowid or 0
+
+    async def get_funnels(self, site_id: int) -> list[dict[str, Any]]:
+        return await self._fetch_all(
+            """SELECT id, site_id, name, description, steps_config, is_active, created_at
+               FROM funnels WHERE site_id=? ORDER BY created_at DESC""",
+            (site_id,),
+        )
+
+    async def get_funnel(self, funnel_id: int) -> dict[str, Any] | None:
+        return await self._fetch_one(
+            """SELECT id, site_id, name, description, steps_config, is_active, created_at
+               FROM funnels WHERE id=?""",
+            (funnel_id,),
+        )
+
+    async def delete_funnel(self, funnel_id: int) -> bool:
+        await self.db.execute("DELETE FROM funnel_steps WHERE funnel_id=?", (funnel_id,))
+        result = await self.db.execute("DELETE FROM funnels WHERE id=?", (funnel_id,))
+        await self.db.commit()
+        return result.rowcount > 0
+
+    async def create_funnel_step(
+        self,
+        funnel_id: int,
+        step_order: int,
+        name: str,
+        url_pattern: str = "",
+        match_type: str = "prefix",
+    ) -> int:
+        cursor = await self.db.execute(
+            """INSERT INTO funnel_steps (funnel_id, step_order, name, url_pattern, match_type)
+               VALUES (?, ?, ?, ?, ?)""",
+            (funnel_id, step_order, name, url_pattern, match_type),
+        )
+        await self.db.commit()
+        return cursor.lastrowid or 0
+
+    async def get_funnel_steps(self, funnel_id: int) -> list[dict[str, Any]]:
+        return await self._fetch_all(
+            """SELECT id, funnel_id, step_order, name, url_pattern, match_type
+               FROM funnel_steps WHERE funnel_id=? ORDER BY step_order""",
+            (funnel_id,),
+        )
+
+    async def log_funnel_completion(
+        self,
+        funnel_id: int,
+        visitor_id: str,
+        session_id: str,
+        step_id: int,
+        step_order: int,
+        url: str = "",
+    ) -> int:
+        existing = await self._fetch_one(
+            """SELECT id FROM funnel_completions
+               WHERE funnel_id=? AND visitor_id=? AND step_id=?""",
+            (funnel_id, visitor_id, step_id),
+        )
+        if existing:
+            return existing["id"]
+
+        cursor = await self.db.execute(
+            """INSERT INTO funnel_completions (funnel_id, visitor_id, session_id, step_id, step_order, url)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (funnel_id, visitor_id, session_id, step_id, step_order, url),
+        )
+        await self.db.commit()
+        return cursor.lastrowid or 0
+
+    async def get_funnel_stats(self, funnel_id: int, days: int = 30) -> dict[str, Any]:
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        steps = await self.get_funnel_steps(funnel_id)
+        if not steps:
+            return {"steps": [], "overall_conversion": 0}
+
+        step_stats = []
+        first_step_visitors = 0
+
+        for idx, step in enumerate(steps):
+            completions = await self._fetch_one(
+                """SELECT COUNT(DISTINCT visitor_id) as count
+                   FROM funnel_completions
+                   WHERE funnel_id=? AND step_order=? AND created_at>=?""",
+                (funnel_id, step["step_order"], since),
+            )
+            visitor_count = completions["count"] if completions else 0
+
+            if idx == 0:
+                first_step_visitors = visitor_count
+
+            drop_off = 0
+            conversion_rate = 0
+            if idx > 0 and first_step_visitors > 0:
+                conversion_rate = round((visitor_count / first_step_visitors) * 100, 2)
+                prev_count = step_stats[idx - 1]["visitor_count"]
+                if prev_count > 0:
+                    drop_off = round(((prev_count - visitor_count) / prev_count) * 100, 2)
+
+            step_stats.append({
+                "step_order": step["step_order"],
+                "name": step["name"],
+                "visitor_count": visitor_count,
+                "conversion_rate": conversion_rate,
+                "drop_off_rate": drop_off,
+            })
+
+        overall_conversion = 0
+        if first_step_visitors > 0 and step_stats:
+            last_step_count = step_stats[-1]["visitor_count"]
+            overall_conversion = round((last_step_count / first_step_visitors) * 100, 2)
+
+        return {
+            "steps": step_stats,
+            "first_step_visitors": first_step_visitors,
+            "overall_conversion": overall_conversion,
+        }
+
+    # ── Goals CRUD ─────────────────────────────────────────────────────────
+
+    async def create_goal(
+        self,
+        site_id: int,
+        name: str,
+        goal_type: str = "pageview",
+        url_pattern: str = "",
+        match_type: str = "prefix",
+    ) -> int:
+        cursor = await self.db.execute(
+            """INSERT INTO goals (site_id, name, goal_type, url_pattern, match_type)
+               VALUES (?, ?, ?, ?, ?)""",
+            (site_id, name, goal_type, url_pattern, match_type),
+        )
+        await self.db.commit()
+        return cursor.lastrowid or 0
+
+    async def get_goals(self, site_id: int) -> list[dict[str, Any]]:
+        return await self._fetch_all(
+            """SELECT id, site_id, name, goal_type, url_pattern, match_type, is_active, created_at
+               FROM goals WHERE site_id=? ORDER BY created_at DESC""",
+            (site_id,),
+        )
+
+    async def get_goal(self, goal_id: int) -> dict[str, Any] | None:
+        return await self._fetch_one(
+            """SELECT id, site_id, name, goal_type, url_pattern, match_type, is_active, created_at
+               FROM goals WHERE id=?""",
+            (goal_id,),
+        )
+
+    async def delete_goal(self, goal_id: int) -> bool:
+        await self.db.execute("DELETE FROM goal_completions WHERE goal_id=?", (goal_id,))
+        result = await self.db.execute("DELETE FROM goals WHERE id=?", (goal_id,))
+        await self.db.commit()
+        return result.rowcount > 0
+
+    async def log_goal_completion(
+        self,
+        goal_id: int,
+        visitor_id: str,
+        session_id: str,
+        url: str = "",
+    ) -> int:
+        cursor = await self.db.execute(
+            """INSERT INTO goal_completions (goal_id, visitor_id, session_id, url)
+               VALUES (?, ?, ?, ?)""",
+            (goal_id, visitor_id, session_id, url),
+        )
+        await self.db.commit()
+        return cursor.lastrowid or 0
+
+    async def get_goal_stats(self, goal_id: int, days: int = 30) -> dict[str, Any]:
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        goal = await self.get_goal(goal_id)
+        if not goal:
+            return {}
+
+        completions = await self._fetch_one(
+            """SELECT COUNT(*) as total, COUNT(DISTINCT visitor_id) as unique_visitors
+               FROM goal_completions WHERE goal_id=? AND completed_at>=?""",
+            (goal_id, since),
+        )
+
+        daily = await self._fetch_all(
+            """SELECT date(completed_at) as day, COUNT(*) as completions
+               FROM goal_completions WHERE goal_id=? AND completed_at>=?
+               GROUP BY day ORDER BY day""",
+            (goal_id, since),
+        )
+
+        return {
+            "goal": goal,
+            "total_completions": completions["total"] if completions else 0,
+            "unique_visitors": completions["unique_visitors"] if completions else 0,
+            "daily_completions": daily,
+        }
+
+    # ── Exports CRUD ───────────────────────────────────────────────────────
+
+    async def log_export(
+        self,
+        site_id: int,
+        format: str,
+        data_types: str = "[]",
+    ) -> int:
+        cursor = await self.db.execute(
+            "INSERT INTO exports (site_id, format, data_types) VALUES (?, ?, ?)",
+            (site_id, format, data_types),
+        )
+        await self.db.commit()
+        return cursor.lastrowid or 0
+
+    async def get_export_history(self, site_id: int, limit: int = 50) -> list[dict[str, Any]]:
+        return await self._fetch_all(
+            """SELECT id, format, data_types, created_at
+               FROM exports WHERE site_id=? ORDER BY created_at DESC LIMIT ?""",
+            (site_id, limit),
+        )
+
+    # ── Webhooks CRUD ──────────────────────────────────────────────────────
+
+    async def create_webhook(
+        self,
+        site_id: int,
+        name: str,
+        url: str,
+        events: str = '["pageview"]',
+        secret: str = "",
+    ) -> int:
+        cursor = await self.db.execute(
+            """INSERT INTO webhooks (site_id, name, url, events, secret)
+               VALUES (?, ?, ?, ?, ?)""",
+            (site_id, name, url, events, secret),
+        )
+        await self.db.commit()
+        return cursor.lastrowid or 0
+
+    async def get_webhooks(self, site_id: int) -> list[dict[str, Any]]:
+        return await self._fetch_all(
+            """SELECT id, site_id, name, url, events, is_active, last_status, created_at
+               FROM webhooks WHERE site_id=? ORDER BY created_at DESC""",
+            (site_id,),
+        )
+
+    async def get_webhook(self, webhook_id: int) -> dict[str, Any] | None:
+        return await self._fetch_one(
+            """SELECT id, site_id, name, url, events, is_active, secret, last_status, last_error, created_at
+               FROM webhooks WHERE id=?""",
+            (webhook_id,),
+        )
+
+    async def delete_webhook(self, webhook_id: int) -> bool:
+        result = await self.db.execute("DELETE FROM webhooks WHERE id=?", (webhook_id,))
+        await self.db.commit()
+        return result.rowcount > 0
+
+    async def update_webhook_status(
+        self,
+        webhook_id: int,
+        status: int,
+        error: str | None = None,
+    ) -> None:
+        await self.db.execute(
+            "UPDATE webhooks SET last_status=?, last_error=? WHERE id=?",
+            (status, error, webhook_id),
+        )
+        await self.db.commit()
+
+    async def get_active_webhooks(self, site_id: int) -> list[dict[str, Any]]:
+        return await self._fetch_all(
+            """SELECT id, site_id, name, url, events, secret
+               FROM webhooks WHERE site_id=? AND is_active=1""",
+            (site_id,),
         )

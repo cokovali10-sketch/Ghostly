@@ -10,6 +10,7 @@ from aiohttp import web
 
 from ghostly.api.routes import routes as api_routes
 from ghostly.core.database import Database
+from ghostly.core.websocket import WebSocketManager, WebSocketHandler
 
 logger = logging.getLogger("ghostly")
 
@@ -120,8 +121,16 @@ async def on_startup(app: web.Application) -> None:
     await db.init_db()
     logger.info("Database connected and initialised at %s", db.db_path)
 
+    ws_manager: WebSocketManager = app["ws_manager"]
+    await ws_manager.start()
+    logger.info("WebSocket manager started")
+
 
 async def on_cleanup(app: web.Application) -> None:
+    ws_manager: WebSocketManager = app["ws_manager"]
+    await ws_manager.stop()
+    logger.info("WebSocket manager stopped")
+
     db: Database = app["db"]
     await db.close()
     logger.info("Database connection closed")
@@ -137,6 +146,10 @@ def create_app(db_path: str | Path | None = None) -> web.Application:
     else:
         app["db"] = Database()
 
+    ws_manager = WebSocketManager()
+    app["ws_manager"] = ws_manager
+    ws_handler = WebSocketHandler(ws_manager)
+
     app.on_startup.append(on_startup)
     app.on_cleanup.append(on_cleanup)
 
@@ -147,6 +160,8 @@ def create_app(db_path: str | Path | None = None) -> web.Application:
     app.router.add_get("/dashboard/", dashboard_index)
     app.router.add_get("/dashboard/site/{id}", dashboard_site)
     app.router.add_get("/dashboard/site/{id}/", dashboard_site)
+
+    app.router.add_get("/ws/{site_id}", ws_handler.handle_connection)
 
     if STATIC_DIR.exists():
         app.router.add_static("/static/", STATIC_DIR, name="static", show_index=False)
