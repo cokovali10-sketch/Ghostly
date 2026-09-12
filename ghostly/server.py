@@ -10,6 +10,8 @@ from aiohttp import web
 
 from ghostly.api.routes import routes as api_routes
 from ghostly.core.database import Database
+from ghostly.core.plugins import PluginManager
+from ghostly.core.themes import ThemeManager
 from ghostly.core.websocket import WebSocketManager, WebSocketHandler
 
 logger = logging.getLogger("ghostly")
@@ -57,6 +59,31 @@ async def security_middleware(request: web.Request, handler):
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("X-XSS-Protection", "1; mode=block")
+    return response
+
+
+@web.middleware
+async def theme_middleware(request: web.Request, handler):
+    response = await handler(request)
+    if request.path.startswith("/api/") and hasattr(response, "content_type"):
+        ct = response.content_type or ""
+        if "html" in ct:
+            theme_id = request.query.get("theme", "")
+            if not theme_id:
+                theme_id = request.cookies.get("ghostly_theme", "")
+            if theme_id and request.app.get("db"):
+                try:
+                    mgr = ThemeManager(request.app["db"])
+                    css = await mgr.get_theme_css(theme_id)
+                    if css and css != ":root {}":
+                        theme_tag = f'<style id="ghostly-theme">{css}</style>'
+                        if isinstance(response, web.Response) and response.body:
+                            body = response.body.decode("utf-8") if isinstance(response.body, bytes) else str(response.body)
+                            body = body.replace("</head>", f"{theme_tag}\n</head>")
+                            response.body = body.encode("utf-8")
+                            response.content_length = len(response.body)
+                except Exception:
+                    pass
     return response
 
 
@@ -125,8 +152,16 @@ async def on_startup(app: web.Application) -> None:
     await ws_manager.start()
     logger.info("WebSocket manager started")
 
+    plugin_mgr: PluginManager = app["plugin_manager"]
+    loaded = await plugin_mgr.load_all_plugins()
+    logger.info("Plugin manager ready (%d plugins loaded)", loaded)
+
 
 async def on_cleanup(app: web.Application) -> None:
+    plugin_mgr: PluginManager = app["plugin_manager"]
+    await plugin_mgr.unload_all()
+    logger.info("Plugins unloaded")
+
     ws_manager: WebSocketManager = app["ws_manager"]
     await ws_manager.stop()
     logger.info("WebSocket manager stopped")
@@ -137,7 +172,7 @@ async def on_cleanup(app: web.Application) -> None:
 
 
 def create_app(db_path: str | Path | None = None) -> web.Application:
-    middlewares = [cors_middleware, security_middleware, logging_middleware]
+    middlewares = [cors_middleware, security_middleware, theme_middleware, logging_middleware]
 
     app = web.Application(middlewares=middlewares)
 
@@ -149,6 +184,9 @@ def create_app(db_path: str | Path | None = None) -> web.Application:
     ws_manager = WebSocketManager()
     app["ws_manager"] = ws_manager
     ws_handler = WebSocketHandler(ws_manager)
+
+    plugin_manager = PluginManager(app["db"])
+    app["plugin_manager"] = plugin_manager
 
     app.on_startup.append(on_startup)
     app.on_cleanup.append(on_cleanup)

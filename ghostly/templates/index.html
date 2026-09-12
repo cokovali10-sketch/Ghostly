@@ -40,6 +40,10 @@
             <span>Real-time</span>
             <span class="nav-badge" id="navActiveCount">0</span>
           </a>
+          <a href="#heatmap" class="nav-item" data-section="heatmap">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>
+            <span>Heatmap</span>
+          </a>
           <a href="#pages" class="nav-item" data-section="pages">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
             <span>Pages</span>
@@ -74,6 +78,32 @@
           <a href="#alerts" class="nav-item" data-section="alerts">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
             <span>Alerts</span>
+          </a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-label">Integrations</div>
+          <a href="#email-reports" class="nav-item" data-section="email-reports">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22 6 12 13 2 6"/></svg>
+            <span>Email Reports</span>
+          </a>
+          <a href="#webhooks" class="nav-item" data-section="webhooks">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+            <span>Webhooks</span>
+          </a>
+        </div>
+        <div class="nav-section">
+          <div class="nav-label">Customize</div>
+          <a href="#themes" class="nav-item" data-section="themes">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12" r="2.5"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.5-.75 1.5-1.5 0-.37-.12-.69-.37-.96-.23-.26-.37-.58-.37-1.04 0-.83.67-1.5 1.5-1.5H16c2.76 0 5-2.24 5-5 0-5.52-4.48-9.93-9-10z"/></svg>
+            <span>Themes</span>
+          </a>
+          <a href="#plugins" class="nav-item" data-section="plugins">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+            <span>Plugins</span>
+          </a>
+          <a href="#backup" class="nav-item" data-section="backup">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span>Backup</span>
           </a>
         </div>
         <div class="nav-section">
@@ -344,6 +374,42 @@
       <div class="modal-footer">
         <button class="btn btn-secondary" id="cancelExportModal">Cancel</button>
         <button class="btn btn-primary" id="confirmExport">Export</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="webhookModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="webhookModalTitle">Add Webhook</h2>
+        <button class="modal-close" id="closeWebhookModal">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="webhookName">Name</label>
+          <input type="text" id="webhookName" placeholder="e.g. Slack Notification" class="form-input">
+        </div>
+        <div class="form-group">
+          <label for="webhookUrl">URL</label>
+          <input type="url" id="webhookUrl" placeholder="https://hooks.slack.com/..." class="form-input">
+        </div>
+        <div class="form-group">
+          <label for="webhookEvent">Event</label>
+          <select id="webhookEvent" class="form-input">
+            <option value="pageview">Pageview</option>
+            <option value="daily_summary">Daily Summary</option>
+            <option value="alert_triggered">Alert Triggered</option>
+            <option value="goal_reached">Goal Reached</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="webhookSecret">Secret (optional)</label>
+          <input type="text" id="webhookSecret" placeholder="Signing secret for verification" class="form-input">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="cancelWebhookModal">Cancel</button>
+        <button class="btn btn-primary" id="confirmWebhook">Save Webhook</button>
       </div>
     </div>
   </div>

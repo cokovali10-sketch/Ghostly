@@ -1004,3 +1004,523 @@ async def delete_webhook(request: web.Request) -> web.Response:
     if not deleted:
         return _error("Webhook not found", status=404)
     return _json_response({"ok": True})
+
+
+# ── Email Reports ───────────────────────────────────────────────────────
+
+
+@routes.get("/api/email/config")
+async def get_email_config(request: web.Request) -> web.Response:
+    from ghostly.core.email import EmailReporter
+    db = _get_db(request)
+    reporter = EmailReporter(db)
+    await reporter.load_config()
+    return _json_response({"config": reporter.get_config()})
+
+
+@routes.post("/api/email/config")
+async def save_email_config(request: web.Request) -> web.Response:
+    from ghostly.core.email import EmailReporter
+    db = _get_db(request)
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    required = ["host", "port"]
+    missing = [f for f in required if f not in body]
+    if missing:
+        return _error(f"Missing fields: {', '.join(missing)}")
+
+    reporter = EmailReporter(db)
+    await reporter.save_config(body)
+    return _json_response({"ok": True})
+
+
+@routes.post("/api/email/test")
+async def send_test_email(request: web.Request) -> web.Response:
+    from ghostly.core.email import EmailReporter
+    db = _get_db(request)
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    recipients = body.get("recipients", [])
+    site_id = body.get("site_id")
+    if not recipients:
+        return _error("Missing 'recipients' list")
+    if not site_id:
+        return _error("Missing 'site_id'")
+
+    reporter = EmailReporter(db)
+    await reporter.load_config()
+    result = await reporter.send_report(int(site_id), recipients, days=7)
+    return _json_response(result)
+
+
+@routes.get("/api/sites/{id}/email/schedules")
+async def list_email_schedules(request: web.Request) -> web.Response:
+    from ghostly.core.email import EmailReporter
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    reporter = EmailReporter(db)
+    schedules = await reporter.get_schedules()
+    site_schedules = [s for s in schedules if s.get("site_id") == site_id]
+    return _json_response({"schedules": site_schedules})
+
+
+@routes.post("/api/sites/{id}/email/schedules")
+async def create_email_schedule(request: web.Request) -> web.Response:
+    from ghostly.core.email import EmailReporter
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    recipients = body.get("recipients", [])
+    cron_expr = body.get("cron_expr", "0 8 * * 1")
+    days = body.get("days", 7)
+
+    if not recipients:
+        return _error("Missing 'recipients' list")
+
+    reporter = EmailReporter(db)
+    try:
+        schedule = await reporter.create_schedule(site_id, recipients, cron_expr, days)
+    except ValueError as exc:
+        return _error(str(exc))
+
+    return _json_response(schedule, status=201)
+
+
+@routes.delete("/api/email/schedules/{id}")
+async def delete_email_schedule(request: web.Request) -> web.Response:
+    from ghostly.core.email import EmailReporter
+    schedule_id = int(request.match_info["id"])
+    db = _get_db(request)
+    reporter = EmailReporter(db)
+    deleted = await reporter.delete_schedule(schedule_id)
+    if not deleted:
+        return _error("Schedule not found", status=404)
+    return _json_response({"ok": True})
+
+
+@routes.post("/api/sites/{id}/email/send")
+async def send_report_now(request: web.Request) -> web.Response:
+    from ghostly.core.email import EmailReporter
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    recipients = body.get("recipients", [])
+    days = body.get("days", 7)
+
+    if not recipients:
+        return _error("Missing 'recipients' list")
+
+    reporter = EmailReporter(db)
+    await reporter.load_config()
+    result = await reporter.send_report(site_id, recipients, days=days)
+    return _json_response(result)
+
+
+# ── Webhook Management ──────────────────────────────────────────────────
+
+
+@routes.get("/api/sites/{id}/webhooks/history")
+async def webhook_history(request: web.Request) -> web.Response:
+    from ghostly.core.webhooks import WebhookManager
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    mgr = WebhookManager(db)
+    history = await mgr.get_delivery_history(site_id)
+    return _json_response({"history": history})
+
+
+@routes.post("/api/webhooks/{id}/test")
+async def test_webhook(request: web.Request) -> web.Response:
+    from ghostly.core.webhooks import WebhookManager
+    webhook_id = int(request.match_info["id"])
+    db = _get_db(request)
+    mgr = WebhookManager(db)
+
+    try:
+        result = await mgr.test_webhook(webhook_id)
+    except ValueError as exc:
+        return _error(str(exc), status=404)
+
+    return _json_response(result)
+
+
+# ── Heatmap ─────────────────────────────────────────────────────────────
+
+
+@routes.post("/api/sites/{id}/heatmap/click")
+async def record_heatmap_click(request: web.Request) -> web.Response:
+    from ghostly.core.heatmap import HeatmapCollector
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    x = body.get("x")
+    y = body.get("y")
+    if x is None or y is None:
+        return _error("Missing 'x' or 'y' coordinates")
+
+    collector = HeatmapCollector(db)
+    click_id = await collector.record_click(
+        site_id=site_id,
+        visitor_id=body.get("visitor_id", ""),
+        page_url=body.get("page_url", "/"),
+        x=float(x),
+        y=float(y),
+        viewport_width=int(body.get("viewport_width", 0)),
+        viewport_height=int(body.get("viewport_height", 0)),
+        element_tag=body.get("element_tag", ""),
+        element_id=body.get("element_id", ""),
+        element_classes=body.get("element_classes", ""),
+    )
+    return _json_response({"ok": True, "id": click_id}, status=201)
+
+
+@routes.get("/api/sites/{id}/heatmap/grid")
+async def heatmap_grid(request: web.Request) -> web.Response:
+    from ghostly.core.heatmap import HeatmapCollector
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    page_url = request.query.get("page_url")
+    days = _parse_days(request)
+
+    collector = HeatmapCollector(db)
+    data = await collector.generate_grid_data(site_id, page_url=page_url, days=days)
+    return _json_response(data)
+
+
+@routes.get("/api/sites/{id}/heatmap/sections")
+async def heatmap_sections(request: web.Request) -> web.Response:
+    from ghostly.core.heatmap import HeatmapCollector
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    page_url = request.query.get("page_url")
+    days = _parse_days(request)
+
+    collector = HeatmapCollector(db)
+    data = await collector.generate_section_data(site_id, page_url=page_url, days=days)
+    return _json_response(data)
+
+
+@routes.get("/api/sites/{id}/heatmap/elements")
+async def heatmap_elements(request: web.Request) -> web.Response:
+    from ghostly.core.heatmap import HeatmapCollector
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    page_url = request.query.get("page_url")
+    days = _parse_days(request)
+
+    collector = HeatmapCollector(db)
+    elements = await collector.get_click_element_stats(site_id, page_url=page_url, days=days)
+    return _json_response({"elements": elements})
+
+
+@routes.get("/api/sites/{id}/heatmap/pages")
+async def heatmap_pages(request: web.Request) -> web.Response:
+    from ghostly.core.heatmap import HeatmapCollector
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    days = _parse_days(request)
+
+    collector = HeatmapCollector(db)
+    pages = await collector.get_page_click_counts(site_id, days=days)
+    return _json_response({"pages": pages})
+
+
+@routes.get("/api/sites/{id}/heatmap/clicks")
+async def heatmap_clicks(request: web.Request) -> web.Response:
+    from ghostly.core.heatmap import HeatmapCollector
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    page_url = request.query.get("page_url")
+    days = _parse_days(request)
+
+    collector = HeatmapCollector(db)
+    clicks = await collector.get_clicks(site_id, page_url=page_url, days=days)
+    return _json_response({"clicks": clicks, "total": len(clicks)})
+
+
+# ── Themes ──────────────────────────────────────────────────────────────
+
+
+@routes.get("/api/themes")
+async def list_themes(request: web.Request) -> web.Response:
+    from ghostly.core.themes import ThemeManager
+    db = _get_db(request)
+    mgr = ThemeManager(db)
+    themes = await mgr.get_themes()
+    return _json_response({"themes": themes})
+
+
+@routes.get("/api/themes/{id}")
+async def get_theme(request: web.Request) -> web.Response:
+    from ghostly.core.themes import ThemeManager
+    theme_id = request.match_info["id"]
+    db = _get_db(request)
+    mgr = ThemeManager(db)
+    theme = await mgr.get_theme(theme_id)
+    if not theme:
+        return _error("Theme not found", status=404)
+    return _json_response({"theme": theme})
+
+
+@routes.post("/api/themes")
+async def create_theme(request: web.Request) -> web.Response:
+    from ghostly.core.themes import ThemeManager
+    db = _get_db(request)
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    theme_id = (body.get("id") or "").strip()
+    variables = body.get("variables", {})
+
+    if not theme_id:
+        return _error("Missing 'id' field")
+
+    mgr = ThemeManager(db)
+    try:
+        theme = await mgr.save_theme(theme_id, variables)
+    except ValueError as exc:
+        return _error(str(exc))
+
+    return _json_response({"id": theme_id, "theme": theme}, status=201)
+
+
+@routes.delete("/api/themes/{id}")
+async def delete_theme(request: web.Request) -> web.Response:
+    from ghostly.core.themes import ThemeManager
+    theme_id = request.match_info["id"]
+    db = _get_db(request)
+    mgr = ThemeManager(db)
+    try:
+        deleted = await mgr.delete_theme(theme_id)
+    except ValueError as exc:
+        return _error(str(exc))
+    if not deleted:
+        return _error("Theme not found", status=404)
+    return _json_response({"ok": True})
+
+
+@routes.get("/api/themes/{id}/css")
+async def get_theme_css(request: web.Request) -> web.Response:
+    from ghostly.core.themes import ThemeManager
+    theme_id = request.match_info["id"]
+    db = _get_db(request)
+    mgr = ThemeManager(db)
+    css = await mgr.get_theme_css(theme_id)
+    return web.Response(text=css, content_type="text/css")
+
+
+@routes.get("/api/users/{id}/theme")
+async def get_user_theme(request: web.Request) -> web.Response:
+    from ghostly.core.themes import ThemeManager
+    user_id = request.match_info["id"]
+    db = _get_db(request)
+    mgr = ThemeManager(db)
+    theme_id = await mgr.get_user_theme(user_id)
+    return _json_response({"theme_id": theme_id or "dark"})
+
+
+@routes.post("/api/users/{id}/theme")
+async def set_user_theme(request: web.Request) -> web.Response:
+    from ghostly.core.themes import ThemeManager
+    user_id = request.match_info["id"]
+    db = _get_db(request)
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    theme_id = body.get("theme_id", "")
+    if not theme_id:
+        return _error("Missing 'theme_id'")
+
+    mgr = ThemeManager(db)
+    try:
+        await mgr.set_user_theme(user_id, theme_id)
+    except ValueError as exc:
+        return _error(str(exc))
+
+    return _json_response({"ok": True, "theme_id": theme_id})
+
+
+# ── Plugins ─────────────────────────────────────────────────────────────
+
+
+@routes.get("/api/plugins")
+async def list_plugins(request: web.Request) -> web.Response:
+    from ghostly.core.plugins import PluginManager
+    db = _get_db(request)
+    mgr = PluginManager(db)
+    plugins = mgr.list_plugins()
+    hooks = mgr.get_hook_count()
+    return _json_response({"plugins": plugins, "hooks": hooks})
+
+
+@routes.post("/api/plugins/reload")
+async def reload_plugins(request: web.Request) -> web.Response:
+    from ghostly.core.plugins import PluginManager
+    db = _get_db(request)
+    mgr = PluginManager(db)
+    await mgr.unload_all()
+    count = await mgr.load_all_plugins()
+    return _json_response({"ok": True, "loaded": count})
+
+
+@routes.get("/api/plugins/{name}")
+async def get_plugin(request: web.Request) -> web.Response:
+    from ghostly.core.plugins import PluginManager
+    name = request.match_info["name"]
+    db = _get_db(request)
+    mgr = PluginManager(db)
+    plugin = mgr.get_plugin(name)
+    if not plugin:
+        return _error("Plugin not found", status=404)
+    return _json_response({"plugin": plugin.to_dict()})
+
+
+# ── Backup & Restore ────────────────────────────────────────────────────
+
+
+@routes.get("/api/backups")
+async def list_backups(request: web.Request) -> web.Response:
+    from ghostly.core.backup import BackupManager
+    db = _get_db(request)
+    mgr = BackupManager(db)
+    backups = await mgr.list_backups()
+    return _json_response({"backups": backups})
+
+
+@routes.post("/api/backups")
+async def create_backup(request: web.Request) -> web.Response:
+    from ghostly.core.backup import BackupManager
+    db = _get_db(request)
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        body = {}
+
+    name = body.get("name")
+    compress = body.get("compress", True)
+
+    mgr = BackupManager(db)
+    result = await mgr.create_backup(name=name, compress=compress)
+    return _json_response(result, status=201)
+
+
+@routes.post("/api/backups/restore")
+async def restore_backup(request: web.Request) -> web.Response:
+    from ghostly.core.backup import BackupManager
+    db = _get_db(request)
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    filename = body.get("filename", "")
+    if not filename:
+        return _error("Missing 'filename'")
+
+    mgr = BackupManager(db)
+    try:
+        result = await mgr.restore_backup(filename)
+    except FileNotFoundError as exc:
+        return _error(str(exc), status=404)
+
+    return _json_response(result)
+
+
+@routes.delete("/api/backups/{filename}")
+async def delete_backup(request: web.Request) -> web.Response:
+    from ghostly.core.backup import BackupManager
+    filename = request.match_info["filename"]
+    db = _get_db(request)
+    mgr = BackupManager(db)
+    deleted = await mgr.delete_backup(filename)
+    if not deleted:
+        return _error("Backup not found", status=404)
+    return _json_response({"ok": True})
+
+
+@routes.post("/api/backups/prune")
+async def prune_backups(request: web.Request) -> web.Response:
+    from ghostly.core.backup import BackupManager
+    db = _get_db(request)
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        body = {}
+
+    keep = body.get("keep", 10)
+
+    mgr = BackupManager(db)
+    pruned = await mgr.prune_old_backups(keep_count=keep)
+    return _json_response({"ok": True, "pruned": pruned})

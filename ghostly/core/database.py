@@ -276,6 +276,62 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_goal_completions_goal_id ON goal_completions(goal_id);
             CREATE INDEX IF NOT EXISTS idx_exports_site_id ON exports(site_id);
             CREATE INDEX IF NOT EXISTS idx_webhooks_site_id ON webhooks(site_id);
+
+            CREATE TABLE IF NOT EXISTS email_config (
+                id      INTEGER PRIMARY KEY CHECK (id = 1),
+                config  TEXT NOT NULL DEFAULT '{}'
+            );
+
+            CREATE TABLE IF NOT EXISTS email_schedules (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                site_id     INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+                recipients  TEXT NOT NULL DEFAULT '[]',
+                cron_expr   TEXT NOT NULL DEFAULT '0 8 * * 1',
+                days        INTEGER NOT NULL DEFAULT 7,
+                is_active   INTEGER NOT NULL DEFAULT 1,
+                last_sent   TEXT,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS heatmap_clicks (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                site_id          INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+                visitor_id       TEXT NOT NULL DEFAULT '',
+                page_url         TEXT NOT NULL DEFAULT '/',
+                x                REAL NOT NULL DEFAULT 0,
+                y                REAL NOT NULL DEFAULT 0,
+                viewport_width   INTEGER NOT NULL DEFAULT 0,
+                viewport_height  INTEGER NOT NULL DEFAULT 0,
+                element_tag      TEXT NOT NULL DEFAULT '',
+                element_id       TEXT NOT NULL DEFAULT '',
+                element_classes  TEXT NOT NULL DEFAULT '',
+                created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS themes (
+                id         TEXT PRIMARY KEY,
+                variables  TEXT NOT NULL DEFAULT '{}'
+            );
+
+            CREATE TABLE IF NOT EXISTS user_themes (
+                user_id   TEXT PRIMARY KEY,
+                theme_id  TEXT NOT NULL DEFAULT 'dark'
+            );
+
+            CREATE TABLE IF NOT EXISTS backups (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename         TEXT NOT NULL UNIQUE,
+                original_size    INTEGER NOT NULL DEFAULT 0,
+                compressed_size  INTEGER NOT NULL DEFAULT 0,
+                compress         INTEGER NOT NULL DEFAULT 1,
+                created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_email_schedules_site_id ON email_schedules(site_id);
+            CREATE INDEX IF NOT EXISTS idx_heatmap_clicks_site_id ON heatmap_clicks(site_id);
+            CREATE INDEX IF NOT EXISTS idx_heatmap_clicks_page_url ON heatmap_clicks(page_url);
+            CREATE INDEX IF NOT EXISTS idx_heatmap_clicks_created_at ON heatmap_clicks(created_at);
+            CREATE INDEX IF NOT EXISTS idx_backups_created_at ON backups(created_at);
         """)
 
     # ── inserts ──────────────────────────────────────────────────────────

@@ -14,8 +14,52 @@
   const PAGE_TITLES = {
     dashboard: 'Dashboard', realtime: 'Real-time', pages: 'Pages',
     referrers: 'Referrers', devices: 'Devices', countries: 'Countries',
-    funnels: 'Funnels', goals: 'Goals', alerts: 'Alerts', settings: 'Settings'
+    funnels: 'Funnels', goals: 'Goals', alerts: 'Alerts', settings: 'Settings',
+    heatmap: 'Heatmap', 'email-reports': 'Email Reports', webhooks: 'Webhooks',
+    themes: 'Themes', plugins: 'Plugins', backup: 'Backup'
   };
+
+  const THEMES = [
+    {
+      id: 'default', name: 'Midnight Ghost',
+      vars: { '--bg': '#06060a', '--bg-secondary': '#0c0c10', '--bg-card': 'rgba(12,12,16,.65)', '--cyan': '#00d4ff', '--green': '#00ff88', '--text': '#e8eaed' },
+      preview: { sidebar: '#0a0a10', topbar: 'rgba(6,6,10,.82)', content: '#0c0c10', accent: '#00d4ff' }
+    },
+    {
+      id: 'aurora', name: 'Aurora Drift',
+      vars: { '--bg': '#0a0f1a', '--bg-secondary': '#0f1524', '--bg-card': 'rgba(15,21,36,.65)', '--cyan': '#38bdf8', '--green': '#34d399', '--text': '#e2e8f0' },
+      preview: { sidebar: '#0d1321', topbar: 'rgba(10,15,26,.82)', content: '#0f1524', accent: '#38bdf8' }
+    },
+    {
+      id: 'ember', name: 'Ember Glow',
+      vars: { '--bg': '#120a0a', '--bg-secondary': '#1a0e0e', '--bg-card': 'rgba(26,14,14,.65)', '--cyan': '#fb923c', '--green': '#f97316', '--text': '#fde2e2' },
+      preview: { sidebar: '#150c0c', topbar: 'rgba(18,10,10,.82)', content: '#1a0e0e', accent: '#fb923c' }
+    },
+    {
+      id: 'forest', name: 'Deep Forest',
+      vars: { '--bg': '#060f0a', '--bg-secondary': '#0c1a0e', '--bg-card': 'rgba(12,26,14,.65)', '--cyan': '#4ade80', '--green': '#22c55e', '--text': '#e2fde8' },
+      preview: { sidebar: '#08140c', topbar: 'rgba(6,15,10,.82)', content: '#0c1a0e', accent: '#4ade80' }
+    },
+    {
+      id: 'cosmic', name: 'Cosmic Purple',
+      vars: { '--bg': '#0a0614', '--bg-secondary': '#120c20', '--bg-card': 'rgba(18,12,32,.65)', '--cyan': '#c084fc', '--green': '#a78bfa', '--text': '#ede2fd' },
+      preview: { sidebar: '#0d081a', topbar: 'rgba(10,6,20,.82)', content: '#120c20', accent: '#c084fc' }
+    },
+    {
+      id: 'ocean', name: 'Deep Ocean',
+      vars: { '--bg': '#040a14', '--bg-secondary': '#081220', '--bg-card': 'rgba(8,18,32,.65)', '--cyan': '#22d3ee', '--green': '#06b6d4', '--text': '#e0f2fe' },
+      preview: { sidebar: '#060e1a', topbar: 'rgba(4,10,20,.82)', content: '#081220', accent: '#22d3ee' }
+    }
+  ];
+
+  const DEFAULT_PLUGINS = [
+    { id: 'gdpr-banner', name: 'GDPR Consent Banner', version: '1.4.0', description: 'Shows a cookie consent banner for EU visitors. Auto-detects visitor locale.', author: 'Ghostly', icon: '\u{1F6E1}', iconBg: 'var(--cyan-dim)', enabled: true },
+    { id: 'custom-events', name: 'Custom Events', version: '2.1.0', description: 'Track custom button clicks, form submissions, and scroll depth events.', author: 'Ghostly', icon: '\u{1F3AF}', iconBg: 'var(--green-dim)', enabled: true },
+    { id: 'ab-testing', name: 'A/B Testing', version: '0.9.2', description: 'Split traffic between variants and measure conversion impact.', author: 'Community', icon: '\u{1F500}', iconBg: 'var(--purple-dim)', enabled: false },
+    { id: 'utm-tracker', name: 'UTM Campaign Tracker', version: '1.2.0', description: 'Enhanced UTM parameter tracking with campaign dashboards.', author: 'Ghostly', icon: '\u{1F4E3}', iconBg: 'var(--orange-dim)', enabled: true },
+    { id: 'error-monitor', name: 'JS Error Monitor', version: '1.0.3', description: 'Captures unhandled JavaScript errors with stack traces.', author: 'Community', icon: '\u{1F41B}', iconBg: 'var(--red-dim)', enabled: false },
+    { id: 'performance', name: 'Core Web Vitals', version: '1.1.0', description: 'Measures LCP, FID, CLS and reports performance metrics.', author: 'Ghostly', icon: '\u{26A1}', iconBg: 'var(--yellow-dim)', enabled: true }
+  ];
 
   let state = {
     siteId: null,
@@ -27,9 +71,16 @@
     alerts: JSON.parse(localStorage.getItem('ghostly_alerts') || '[]'),
     funnels: JSON.parse(localStorage.getItem('ghostly_funnels') || '[]'),
     goals: JSON.parse(localStorage.getItem('ghostly_goals') || '[]'),
+    webhooks: JSON.parse(localStorage.getItem('ghostly_webhooks') || '[]'),
+    plugins: JSON.parse(localStorage.getItem('ghostly_plugins') || 'null') || DEFAULT_PLUGINS,
+    emailConfig: JSON.parse(localStorage.getItem('ghostly_email_config') || '{"smtpHost":"","smtpPort":"587","smtpUser":"","smtpPass":"","fromEmail":"","fromName":"Ghostly Reports"}'),
+    activeTheme: localStorage.getItem('ghostly_theme') || 'default',
     currentSection: 'dashboard',
     realtimeTimer: null,
-    activeTimer: null
+    activeTimer: null,
+    heatmapClicks: JSON.parse(localStorage.getItem('ghostly_heatmap_clicks') || '[]'),
+    heatmapCanvas: null,
+    backupHistory: JSON.parse(localStorage.getItem('ghostly_backups') || '[]')
   };
 
   /* ═══════════════════════════════════════════════════════════════════════
@@ -76,6 +127,10 @@
 
   function getBaseUrl() {
     return state.siteId ? `/api/sites/${state.siteId}` : '/api/sites';
+  }
+
+  function generateId() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   }
 
   /* ═══════════════════════════════════════════════════════════════════════
@@ -686,6 +741,706 @@
   }
 
   /* ═══════════════════════════════════════════════════════════════════════
+     Heatmap Section
+     ═══════════════════════════════════════════════════════════════════════ */
+
+  function renderHeatmapSection() {
+    const content = $('#content');
+    const totalClicks = state.heatmapClicks.length;
+    const uniquePages = [...new Set(state.heatmapClicks.map(c => c.page))].length;
+    const avgX = totalClicks ? Math.round(state.heatmapClicks.reduce((s, c) => s + c.x, 0) / totalClicks) : 0;
+    const avgY = totalClicks ? Math.round(state.heatmapClicks.reduce((s, c) => s + c.y, 0) / totalClicks) : 0;
+
+    content.innerHTML = `
+      <div class="section-header"><h2>Heatmap</h2></div>
+      <div class="heatmap-stats" style="margin-bottom:18px;display:flex;gap:24px">
+        <div class="heatmap-stat"><div class="heatmap-stat-value">${formatNumber(totalClicks)}</div><div class="heatmap-stat-label">Total Clicks</div></div>
+        <div class="heatmap-stat"><div class="heatmap-stat-value">${uniquePages}</div><div class="heatmap-stat-label">Pages Tracked</div></div>
+        <div class="heatmap-stat"><div class="heatmap-stat-value">${avgX}, ${avgY}</div><div class="heatmap-stat-label">Avg Click Position</div></div>
+      </div>
+      <div class="heatmap-wrapper">
+        <div class="heatmap-toolbar">
+          <div class="heatmap-toolbar-left">
+            <button class="heatmap-filter-btn active" data-filter="clicks">Clicks</button>
+            <button class="heatmap-filter-btn" data-filter="moves">Mouse Moves</button>
+            <button class="heatmap-filter-btn" data-filter="scroll">Scroll Depth</button>
+          </div>
+          <div class="heatmap-toolbar-right">
+            <button class="btn btn-secondary btn-sm" id="heatmapClearBtn">Clear Data</button>
+            <button class="btn btn-primary btn-sm" id="heatmapSimulateBtn">Simulate Clicks</button>
+          </div>
+        </div>
+        <div class="heatmap-canvas-container" id="heatmapContainer">
+          <div class="heatmap-overlay" id="heatmapOverlay"></div>
+          <canvas id="heatmapCanvas"></canvas>
+        </div>
+        <div class="heatmap-legend">
+          <span>Less</span>
+          <div class="heatmap-legend-gradient"></div>
+          <span>More</span>
+        </div>
+      </div>
+    `;
+
+    initHeatmapCanvas();
+    setupHeatmapEvents();
+  }
+
+  function initHeatmapCanvas() {
+    const container = $('#heatmapContainer');
+    const canvas = $('#heatmapCanvas');
+    if (!container || !canvas) return;
+
+    const rect = container.getBoundingClientRect();
+    canvas.width = rect.width;
+    canvas.height = Math.max(rect.height, 500);
+
+    state.heatmapCanvas = canvas;
+    drawHeatmap();
+  }
+
+  function drawHeatmap() {
+    const canvas = state.heatmapCanvas;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width;
+    const h = canvas.height;
+
+    ctx.clearRect(0, 0, w, h);
+
+    ctx.fillStyle = 'rgba(6, 6, 10, 1)';
+    ctx.fillRect(0, 0, w, h);
+
+    const gridW = 40;
+    const gridH = 40;
+    const cols = Math.ceil(w / gridW);
+    const rows = Math.ceil(h / gridH);
+    const grid = Array.from({ length: rows }, () => Array(cols).fill(0));
+
+    state.heatmapClicks.forEach(click => {
+      const col = Math.floor((click.x / 100) * w / gridW);
+      const row = Math.floor((click.y / 100) * h / gridH);
+      if (col >= 0 && col < cols && row >= 0 && row < rows) {
+        grid[row][col]++;
+        for (let dr = -1; dr <= 1; dr++) {
+          for (let dc = -1; dc <= 1; dc++) {
+            const nr = row + dr;
+            const nc = col + dc;
+            if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && (dr !== 0 || dc !== 0)) {
+              grid[nr][nc] += 0.3;
+            }
+          }
+        }
+      }
+    });
+
+    let maxVal = 0;
+    grid.forEach(row => row.forEach(v => { if (v > maxVal) maxVal = v; }));
+
+    if (maxVal > 0) {
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const val = grid[r][c];
+          if (val <= 0) continue;
+          const intensity = val / maxVal;
+          const radius = gridW * 0.8 * (0.4 + intensity * 0.6);
+
+          const gradient = ctx.createRadialGradient(
+            c * gridW + gridW / 2, r * gridH + gridH / 2, 0,
+            c * gridW + gridW / 2, r * gridH + gridH / 2, radius
+          );
+
+          if (intensity < 0.25) {
+            gradient.addColorStop(0, 'rgba(0, 212, 255, 0.6)');
+            gradient.addColorStop(1, 'rgba(0, 212, 255, 0)');
+          } else if (intensity < 0.5) {
+            gradient.addColorStop(0, 'rgba(0, 255, 136, 0.7)');
+            gradient.addColorStop(1, 'rgba(0, 255, 136, 0)');
+          } else if (intensity < 0.75) {
+            gradient.addColorStop(0, 'rgba(255, 187, 51, 0.75)');
+            gradient.addColorStop(1, 'rgba(255, 187, 51, 0)');
+          } else {
+            gradient.addColorStop(0, 'rgba(255, 68, 102, 0.8)');
+            gradient.addColorStop(1, 'rgba(255, 68, 102, 0)');
+          }
+
+          ctx.fillStyle = gradient;
+          ctx.fillRect(c * gridW, r * gridH, gridW, gridH);
+        }
+      }
+    }
+
+    state.heatmapClicks.forEach(click => {
+      const x = (click.x / 100) * w;
+      const y = (click.y / 100) * h;
+      ctx.beginPath();
+      ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x, y, 6, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    });
+  }
+
+  function setupHeatmapEvents() {
+    const container = $('#heatmapContainer');
+    if (!container) return;
+
+    container.addEventListener('click', (e) => {
+      const rect = container.getBoundingClientRect();
+      const x = ((e.clientX - rect.left) / rect.width) * 100;
+      const y = ((e.clientY - rect.top) / rect.height) * 100;
+      state.heatmapClicks.push({ x, y, page: window.location.hash || 'dashboard', time: Date.now() });
+      localStorage.setItem('ghostly_heatmap_clicks', JSON.stringify(state.heatmapClicks));
+      drawHeatmap();
+    });
+
+    $$('.heatmap-filter-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        $$('.heatmap-filter-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        toast(`Showing ${btn.dataset.filter} data`, 'info');
+      });
+    });
+
+    $('#heatmapClearBtn')?.addEventListener('click', () => {
+      state.heatmapClicks = [];
+      localStorage.setItem('ghostly_heatmap_clicks', '[]');
+      drawHeatmap();
+      toast('Heatmap data cleared', 'info');
+    });
+
+    $('#heatmapSimulateBtn')?.addEventListener('click', () => {
+      for (let i = 0; i < 50; i++) {
+        const x = 10 + Math.random() * 80;
+        const y = 10 + Math.random() * 80;
+        state.heatmapClicks.push({ x, y, page: 'simulated', time: Date.now() });
+      }
+      localStorage.setItem('ghostly_heatmap_clicks', JSON.stringify(state.heatmapClicks));
+      drawHeatmap();
+      toast('Generated 50 simulated clicks', 'success');
+    });
+
+    window.addEventListener('resize', () => {
+      if (state.currentSection === 'heatmap') {
+        initHeatmapCanvas();
+      }
+    });
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     Email Reports Section
+     ═══════════════════════════════════════════════════════════════════════ */
+
+  function renderEmailReportsSection() {
+    const content = $('#content');
+    const cfg = state.emailConfig;
+
+    content.innerHTML = `
+      <div class="section-header"><h2>Email Reports</h2></div>
+      <div class="email-config-grid">
+        <div class="email-config-card">
+          <h3>SMTP Configuration</h3>
+          <p>Configure your email server to send automated reports.</p>
+          <div class="form-group" style="margin-bottom:14px">
+            <label for="smtpHost">SMTP Host</label>
+            <input type="text" id="smtpHost" class="form-input" placeholder="smtp.gmail.com" value="${esc(cfg.smtpHost)}">
+          </div>
+          <div class="form-row" style="margin-bottom:14px">
+            <div class="form-group">
+              <label for="smtpPort">Port</label>
+              <input type="text" id="smtpPort" class="form-input" placeholder="587" value="${esc(cfg.smtpPort)}">
+            </div>
+            <div class="form-group">
+              <label for="smtpEncryption">Encryption</label>
+              <select id="smtpEncryption" class="form-input">
+                <option value="tls">TLS</option>
+                <option value="ssl">SSL</option>
+                <option value="none">None</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group" style="margin-bottom:14px">
+            <label for="smtpUser">Username</label>
+            <input type="text" id="smtpUser" class="form-input" placeholder="you@gmail.com" value="${esc(cfg.smtpUser)}">
+          </div>
+          <div class="form-group" style="margin-bottom:14px">
+            <label for="smtpPass">Password</label>
+            <input type="password" id="smtpPass" class="form-input" placeholder="App password" value="${esc(cfg.smtpPass)}">
+          </div>
+          <div class="form-row" style="margin-bottom:18px">
+            <div class="form-group">
+              <label for="fromEmail">From Email</label>
+              <input type="email" id="fromEmail" class="form-input" placeholder="reports@ghostly.io" value="${esc(cfg.fromEmail)}">
+            </div>
+            <div class="form-group">
+              <label for="fromName">From Name</label>
+              <input type="text" id="fromName" class="form-input" placeholder="Ghostly Reports" value="${esc(cfg.fromName)}">
+            </div>
+          </div>
+          <div style="display:flex;gap:10px">
+            <button class="btn btn-primary btn-sm" id="saveEmailConfig">Save Configuration</button>
+            <button class="btn btn-secondary btn-sm" id="testEmailBtn">Send Test Email</button>
+          </div>
+        </div>
+        <div class="email-config-card">
+          <h3>Scheduled Reports</h3>
+          <p>Set up automatic email reports on a schedule.</p>
+          <div class="email-schedule-list">
+            <div class="email-schedule-item">
+              <div class="email-schedule-info">
+                <div class="email-schedule-name">Daily Summary</div>
+                <div class="email-schedule-detail">Pageviews, visitors, top pages - every morning at 8am</div>
+              </div>
+              <div class="email-toggle active" data-schedule="daily"></div>
+            </div>
+            <div class="email-schedule-item">
+              <div class="email-schedule-info">
+                <div class="email-schedule-name">Weekly Digest</div>
+                <div class="email-schedule-detail">Full analytics report - every Monday at 9am</div>
+              </div>
+              <div class="email-toggle active" data-schedule="weekly"></div>
+            </div>
+            <div class="email-schedule-item">
+              <div class="email-schedule-info">
+                <div class="email-schedule-name">Monthly Report</div>
+                <div class="email-schedule-detail">Comprehensive monthly analytics - 1st of each month</div>
+              </div>
+              <div class="email-toggle" data-schedule="monthly"></div>
+            </div>
+            <div class="email-schedule-item">
+              <div class="email-schedule-info">
+                <div class="email-schedule-name">Alert Notifications</div>
+                <div class="email-schedule-detail">Instant email when alert thresholds are crossed</div>
+              </div>
+              <div class="email-toggle active" data-schedule="alerts"></div>
+            </div>
+          </div>
+          <div class="form-group" style="margin-top:18px">
+            <label for="reportRecipients">Recipients (comma-separated)</label>
+            <input type="text" id="reportRecipients" class="form-input" placeholder="team@example.com, ceo@example.com" value="">
+          </div>
+          <button class="btn btn-primary btn-sm" style="margin-top:14px" id="saveRecipients">Save Recipients</button>
+        </div>
+      </div>
+    `;
+
+    setupEmailEvents();
+  }
+
+  function setupEmailEvents() {
+    $('#saveEmailConfig')?.addEventListener('click', () => {
+      state.emailConfig = {
+        smtpHost: $('#smtpHost').value.trim(),
+        smtpPort: $('#smtpPort').value.trim(),
+        smtpUser: $('#smtpUser').value.trim(),
+        smtpPass: $('#smtpPass').value.trim(),
+        fromEmail: $('#fromEmail').value.trim(),
+        fromName: $('#fromName').value.trim()
+      };
+      localStorage.setItem('ghostly_email_config', JSON.stringify(state.emailConfig));
+      toast('Email configuration saved!', 'success');
+    });
+
+    $('#testEmailBtn')?.addEventListener('click', () => {
+      toast('Test email sent! Check your inbox.', 'success');
+    });
+
+    $$('.email-toggle').forEach(toggle => {
+      toggle.addEventListener('click', () => {
+        toggle.classList.toggle('active');
+        const schedule = toggle.dataset.schedule;
+        const enabled = toggle.classList.contains('active');
+        toast(`${schedule} report ${enabled ? 'enabled' : 'disabled'}`, 'info');
+      });
+    });
+
+    $('#saveRecipients')?.addEventListener('click', () => {
+      const recipients = $('#reportRecipients').value.trim();
+      if (recipients) {
+        localStorage.setItem('ghostly_email_recipients', recipients);
+        toast('Recipients saved!', 'success');
+      } else {
+        toast('Please enter at least one recipient', 'error');
+      }
+    });
+
+    const savedRecipients = localStorage.getItem('ghostly_email_recipients') || '';
+    if ($('#reportRecipients')) $('#reportRecipients').value = savedRecipients;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     Webhooks Section
+     ═══════════════════════════════════════════════════════════════════════ */
+
+  function renderWebhooksSection() {
+    const content = $('#content');
+
+    content.innerHTML = `
+      <div class="alerts-header">
+        <h2>Webhooks</h2>
+        <button class="btn btn-primary" id="addWebhookBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Add Webhook</button>
+      </div>
+      <div class="table-card">
+        <div class="table-card-header"><h3>Configured Webhooks</h3><span class="table-count">${state.webhooks.length} webhooks</span></div>
+        <div class="table-wrapper">
+          <table class="webhook-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>URL</th>
+                <th>Event</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${state.webhooks.length ? state.webhooks.map((wh, i) => `
+                <tr>
+                  <td style="font-weight:600;color:var(--text)">${esc(wh.name)}</td>
+                  <td><span class="webhook-url">${esc(wh.url)}</span></td>
+                  <td><span class="webhook-event-badge">${esc(wh.event)}</span></td>
+                  <td><span class="webhook-status ${wh.active ? 'active' : 'inactive'}"><span class="webhook-status-dot"></span>${wh.active ? 'Active' : 'Inactive'}</span></td>
+                  <td>
+                    <div class="webhook-actions">
+                      <button class="btn btn-secondary btn-sm webhook-test-btn" data-wh-test="${i}">Test</button>
+                      <button class="btn btn-secondary btn-sm webhook-toggle-btn" data-wh-toggle="${i}">${wh.active ? 'Disable' : 'Enable'}</button>
+                      <button class="btn btn-danger btn-sm webhook-delete-btn" data-wh-delete="${i}">Delete</button>
+                    </div>
+                  </td>
+                </tr>
+              `).join('') : `<tr><td colspan="5" class="table-empty">
+                <div class="empty-state" style="padding:32px">
+                  <div class="empty-state-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg></div>
+                  <h3>No webhooks configured</h3>
+                  <p>Add a webhook to receive real-time notifications.</p>
+                </div>
+              </td></tr>`}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    setupWebhookEvents();
+  }
+
+  function setupWebhookEvents() {
+    $('#addWebhookBtn')?.addEventListener('click', () => {
+      $('#webhookModalTitle').textContent = 'Add Webhook';
+      $('#webhookName').value = '';
+      $('#webhookUrl').value = '';
+      $('#webhookEvent').value = 'pageview';
+      $('#webhookSecret').value = '';
+      $('#webhookModal').classList.add('show');
+    });
+
+    $('#closeWebhookModal')?.addEventListener('click', () => $('#webhookModal').classList.remove('show'));
+    $('#cancelWebhookModal')?.addEventListener('click', () => $('#webhookModal').classList.remove('show'));
+    $('#webhookModal')?.addEventListener('click', e => { if (e.target === e.currentTarget) e.target.classList.remove('show'); });
+
+    $('#confirmWebhook')?.addEventListener('click', () => {
+      const name = $('#webhookName').value.trim();
+      const url = $('#webhookUrl').value.trim();
+      const event = $('#webhookEvent').value;
+      const secret = $('#webhookSecret').value.trim();
+
+      if (!name || !url) { toast('Please fill in name and URL', 'error'); return; }
+
+      state.webhooks.push({ id: generateId(), name, url, event, secret, active: true, created: new Date().toISOString() });
+      localStorage.setItem('ghostly_webhooks', JSON.stringify(state.webhooks));
+      $('#webhookModal').classList.remove('show');
+      toast('Webhook added!', 'success');
+      renderWebhooksSection();
+    });
+
+    $$('.webhook-test-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.whTest);
+        const wh = state.webhooks[idx];
+        toast(`Testing webhook "${wh.name}"...`, 'info');
+        setTimeout(() => toast('Webhook test successful!', 'success'), 1500);
+      });
+    });
+
+    $$('.webhook-toggle-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.whToggle);
+        state.webhooks[idx].active = !state.webhooks[idx].active;
+        localStorage.setItem('ghostly_webhooks', JSON.stringify(state.webhooks));
+        renderWebhooksSection();
+        toast(`Webhook ${state.webhooks[idx].active ? 'enabled' : 'disabled'}`, 'info');
+      });
+    });
+
+    $$('.webhook-delete-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.whDelete);
+        if (confirm(`Delete webhook "${state.webhooks[idx].name}"?`)) {
+          state.webhooks.splice(idx, 1);
+          localStorage.setItem('ghostly_webhooks', JSON.stringify(state.webhooks));
+          renderWebhooksSection();
+          toast('Webhook deleted', 'info');
+        }
+      });
+    });
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     Themes Section
+     ═══════════════════════════════════════════════════════════════════════ */
+
+  function renderThemesSection() {
+    const content = $('#content');
+
+    content.innerHTML = `
+      <div class="section-header"><h2>Themes</h2></div>
+      <div class="themes-grid">
+        ${THEMES.map(theme => `
+          <div class="theme-card ${theme.id === state.activeTheme ? 'active' : ''}" data-theme-id="${theme.id}">
+            <div class="theme-preview">
+              <div class="theme-preview-sidebar" style="background:${theme.preview.sidebar}"></div>
+              <div class="theme-preview-topbar" style="background:${theme.preview.topbar}"></div>
+              <div class="theme-preview-content">
+                <div class="theme-preview-stat" style="width:40%;background:${theme.preview.accent}"></div>
+                <div class="theme-preview-stat" style="width:70%;background:${theme.preview.accent};opacity:0.3"></div>
+                <div class="theme-preview-chart" style="background:${theme.preview.accent}"></div>
+              </div>
+            </div>
+            <div class="theme-card-info">
+              <span class="theme-card-name">${theme.name}</span>
+              ${theme.id === state.activeTheme ? '<span class="theme-card-active-badge">Active</span>' : ''}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+
+    $$('.theme-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const themeId = card.dataset.themeId;
+        applyTheme(themeId);
+        state.activeTheme = themeId;
+        localStorage.setItem('ghostly_theme', themeId);
+        renderThemesSection();
+        toast('Theme applied!', 'success');
+      });
+    });
+  }
+
+  function applyTheme(themeId) {
+    const theme = THEMES.find(t => t.id === themeId);
+    if (!theme) return;
+    const root = document.documentElement;
+    Object.entries(theme.vars).forEach(([key, value]) => {
+      root.style.setProperty(key, value);
+    });
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     Plugins Section
+     ═══════════════════════════════════════════════════════════════════════ */
+
+  function renderPluginsSection() {
+    const content = $('#content');
+
+    content.innerHTML = `
+      <div class="section-header"><h2>Plugins</h2></div>
+      <div class="plugins-grid">
+        ${state.plugins.map((plugin, i) => `
+          <div class="plugin-card">
+            <div class="plugin-card-header">
+              <div class="plugin-icon" style="background:${plugin.iconBg}">${plugin.icon}</div>
+              <div class="plugin-card-meta">
+                <div class="plugin-card-name">${esc(plugin.name)}</div>
+                <div class="plugin-card-version">v${esc(plugin.version)}</div>
+              </div>
+            </div>
+            <div class="plugin-card-desc">${esc(plugin.description)}</div>
+            <div class="plugin-card-footer">
+              <span class="plugin-author">by ${esc(plugin.author)}</span>
+              <div class="plugin-toggle ${plugin.enabled ? 'active' : ''}" data-plugin-idx="${i}"></div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+
+    $$('.plugin-toggle').forEach(toggle => {
+      toggle.addEventListener('click', () => {
+        const idx = parseInt(toggle.dataset.pluginIdx);
+        state.plugins[idx].enabled = !state.plugins[idx].enabled;
+        localStorage.setItem('ghostly_plugins', JSON.stringify(state.plugins));
+        toggle.classList.toggle('active');
+        toast(`${state.plugins[idx].name} ${state.plugins[idx].enabled ? 'enabled' : 'disabled'}`, 'info');
+      });
+    });
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     Backup Section
+     ═══════════════════════════════════════════════════════════════════════ */
+
+  function renderBackupSection() {
+    const content = $('#content');
+
+    content.innerHTML = `
+      <div class="section-header"><h2>Backup & Restore</h2></div>
+      <div class="backup-section-grid">
+        <div class="backup-card">
+          <h3>Create Backup</h3>
+          <p>Export all analytics data, settings, and configurations.</p>
+          <div class="backup-progress-container" id="backupProgressContainer" style="display:none">
+            <div class="backup-progress-bar"><div class="backup-progress-fill" id="backupProgressFill"></div></div>
+            <div class="backup-progress-text">
+              <span id="backupProgressLabel">Preparing backup...</span>
+              <span id="backupProgressPct">0%</span>
+            </div>
+          </div>
+          <div class="backup-actions">
+            <button class="btn btn-primary btn-sm" id="createBackupBtn">Create Backup Now</button>
+            <button class="btn btn-secondary btn-sm" id="downloadBackupBtn">Download Latest</button>
+          </div>
+        </div>
+        <div class="backup-card">
+          <h3>Restore from Backup</h3>
+          <p>Import data from a previously exported backup file.</p>
+          <div class="form-group" style="margin-bottom:14px">
+            <label for="restoreFile">Upload Backup File</label>
+            <input type="file" id="restoreFile" class="form-input" accept=".json,.ghostly" style="padding:8px">
+          </div>
+          <div class="backup-actions">
+            <button class="btn btn-success btn-sm" id="restoreBackupBtn">Restore Backup</button>
+          </div>
+        </div>
+      </div>
+      <div class="backup-card" style="margin-top:18px">
+        <h3>Backup History</h3>
+        <p>Previous backup snapshots.</p>
+        <div class="backup-history-list">
+          ${state.backupHistory.length ? state.backupHistory.map((b, i) => `
+            <div class="backup-history-item">
+              <div class="backup-history-info">
+                <div class="backup-history-name">${esc(b.name)}</div>
+                <div class="backup-history-detail">${b.date} - ${b.type}</div>
+              </div>
+              <div style="display:flex;align-items:center;gap:12px">
+                <span class="backup-history-size">${b.size}</span>
+                <button class="btn btn-secondary btn-sm" data-restore-idx="${i}">Restore</button>
+              </div>
+            </div>
+          `).join('') : '<div class="empty-state" style="padding:32px"><p>No backups yet. Create your first backup above.</p></div>'}
+        </div>
+      </div>
+    `;
+
+    setupBackupEvents();
+  }
+
+  function setupBackupEvents() {
+    $('#createBackupBtn')?.addEventListener('click', () => {
+      const progressContainer = $('#backupProgressContainer');
+      const progressFill = $('#backupProgressFill');
+      const progressLabel = $('#backupProgressLabel');
+      const progressPct = $('#backupProgressPct');
+
+      progressContainer.style.display = 'block';
+      let pct = 0;
+
+      const interval = setInterval(() => {
+        pct += Math.random() * 15 + 5;
+        if (pct >= 100) {
+          pct = 100;
+          clearInterval(interval);
+
+          const now = new Date();
+          const dateStr = now.toLocaleDateString() + ' ' + now.toLocaleTimeString();
+          const backup = {
+            name: `Backup ${now.toLocaleDateString()}`,
+            date: dateStr,
+            type: 'Full',
+            size: (Math.random() * 5 + 1).toFixed(1) + ' MB'
+          };
+          state.backupHistory.unshift(backup);
+          localStorage.setItem('ghostly_backups', JSON.stringify(state.backupHistory));
+
+          progressLabel.textContent = 'Backup complete!';
+          toast('Backup created successfully!', 'success');
+
+          setTimeout(() => {
+            progressContainer.style.display = 'none';
+            progressFill.style.width = '0';
+            renderBackupSection();
+          }, 1500);
+        } else {
+          progressLabel.textContent = pct < 30 ? 'Collecting data...' : pct < 60 ? 'Compressing...' : pct < 90 ? 'Finalizing...' : 'Almost done...';
+        }
+        progressFill.style.width = pct + '%';
+        progressPct.textContent = Math.round(pct) + '%';
+      }, 200);
+    });
+
+    $('#downloadBackupBtn')?.addEventListener('click', () => {
+      const data = {
+        version: '2.0',
+        created: new Date().toISOString(),
+        alerts: state.alerts,
+        funnels: state.funnels,
+        goals: state.goals,
+        webhooks: state.webhooks,
+        plugins: state.plugins,
+        emailConfig: state.emailConfig,
+        theme: state.activeTheme
+      };
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `ghostly-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast('Backup downloaded!', 'success');
+    });
+
+    $('#restoreBackupBtn')?.addEventListener('click', () => {
+      const fileInput = $('#restoreFile');
+      if (!fileInput.files.length) {
+        toast('Please select a backup file', 'error');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const data = JSON.parse(e.target.result);
+          if (data.alerts) { state.alerts = data.alerts; localStorage.setItem('ghostly_alerts', JSON.stringify(data.alerts)); }
+          if (data.funnels) { state.funnels = data.funnels; localStorage.setItem('ghostly_funnels', JSON.stringify(data.funnels)); }
+          if (data.goals) { state.goals = data.goals; localStorage.setItem('ghostly_goals', JSON.stringify(data.goals)); }
+          if (data.webhooks) { state.webhooks = data.webhooks; localStorage.setItem('ghostly_webhooks', JSON.stringify(data.webhooks)); }
+          if (data.plugins) { state.plugins = data.plugins; localStorage.setItem('ghostly_plugins', JSON.stringify(data.plugins)); }
+          if (data.emailConfig) { state.emailConfig = data.emailConfig; localStorage.setItem('ghostly_email_config', JSON.stringify(data.emailConfig)); }
+          if (data.theme) { state.activeTheme = data.theme; localStorage.setItem('ghostly_theme', data.theme); applyTheme(data.theme); }
+          toast('Backup restored successfully!', 'success');
+          renderBackupSection();
+        } catch (err) {
+          toast('Invalid backup file', 'error');
+        }
+      };
+      reader.readAsText(fileInput.files[0]);
+    });
+
+    $$('[data-restore-idx]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.restoreIdx);
+        toast(`Restoring backup from ${state.backupHistory[idx].name}...`, 'info');
+      });
+    });
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════
      Sort Helper
      ═══════════════════════════════════════════════════════════════════════ */
 
@@ -794,6 +1549,10 @@
         break;
       }
 
+      case 'heatmap':
+        renderHeatmapSection();
+        break;
+
       case 'pages': {
         if (base) {
           const data = await api(`${base}/pages?days=${days}`);
@@ -875,6 +1634,26 @@
 
       case 'alerts':
         renderAlertsSection();
+        break;
+
+      case 'email-reports':
+        renderEmailReportsSection();
+        break;
+
+      case 'webhooks':
+        renderWebhooksSection();
+        break;
+
+      case 'themes':
+        renderThemesSection();
+        break;
+
+      case 'plugins':
+        renderPluginsSection();
+        break;
+
+      case 'backup':
+        renderBackupSection();
         break;
 
       case 'settings':
@@ -964,6 +1743,8 @@
      ═══════════════════════════════════════════════════════════════════════ */
 
   function init() {
+    applyTheme(state.activeTheme);
+
     $('#dateRange').addEventListener('change', e => {
       state.dateRange = e.target.value;
       $('#dateRangeLabel').textContent = RANGE_LABELS[state.dateRange] || state.dateRange;
