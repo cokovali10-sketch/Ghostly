@@ -11,12 +11,15 @@ from urllib.parse import urlparse
 import aiosqlite
 from aiohttp import web
 
+from ghostly.core.ab_test import ABTestManager
 from ghostly.core.alerts import AlertManager
 from ghostly.core.auth import AuthManager
 from ghostly.core.database import Database
 from ghostly.core.export import ExportManager
 from ghostly.core.funnels import FunnelManager
+from ghostly.core.geomap import GeoMapCollector
 from ghostly.core.goals import GoalManager
+from ghostly.core.retention import RetentionAnalyzer
 
 logger = logging.getLogger("ghostly.api")
 
@@ -1524,3 +1527,467 @@ async def prune_backups(request: web.Request) -> web.Response:
     mgr = BackupManager(db)
     pruned = await mgr.prune_old_backups(keep_count=keep)
     return _json_response({"ok": True, "pruned": pruned})
+
+
+# ── Geographic Map ──────────────────────────────────────────────────────
+
+
+@routes.post("/api/sites/{id}/geomap/location")
+async def record_geo_location(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    visitor_id = (body.get("visitor_id") or "").strip()
+    if not visitor_id:
+        return _error("Missing 'visitor_id' field")
+
+    collector = GeoMapCollector(db)
+    location_id = await collector.record_visitor_location(
+        site_id=site_id,
+        visitor_id=visitor_id,
+        country=body.get("country", ""),
+        city=body.get("city", ""),
+        latitude=body.get("latitude"),
+        longitude=body.get("longitude"),
+        ip_address=body.get("ip_address", ""),
+    )
+    return _json_response({"ok": True, "id": location_id}, status=201)
+
+
+@routes.get("/api/sites/{id}/geomap/countries")
+async def geomap_countries(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+    days = _parse_days(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    collector = GeoMapCollector(db)
+    countries = await collector.get_country_stats(site_id, days=days)
+    return _json_response({"countries": countries, "period_days": days})
+
+
+@routes.get("/api/sites/{id}/geomap/cities")
+async def geomap_cities(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+    days = _parse_days(request)
+    limit = _parse_limit(request, default=100)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    collector = GeoMapCollector(db)
+    cities = await collector.get_city_stats(site_id, days=days, limit=limit)
+    return _json_response({"cities": cities, "period_days": days})
+
+
+@routes.get("/api/sites/{id}/geomap/top-countries")
+async def geomap_top_countries(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+    days = _parse_days(request)
+    limit = _parse_limit(request, default=10)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    collector = GeoMapCollector(db)
+    countries = await collector.get_top_countries(site_id, days=days, limit=limit)
+    return _json_response({"top_countries": countries, "period_days": days})
+
+
+@routes.get("/api/sites/{id}/geomap/top-cities")
+async def geomap_top_cities(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+    days = _parse_days(request)
+    limit = _parse_limit(request, default=20)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    collector = GeoMapCollector(db)
+    cities = await collector.get_top_cities(site_id, days=days, limit=limit)
+    return _json_response({"top_cities": cities, "period_days": days})
+
+
+@routes.get("/api/sites/{id}/geomap/geojson")
+async def geomap_geojson(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+    days = _parse_days(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    collector = GeoMapCollector(db)
+    geojson = await collector.generate_geojson(site_id, days=days)
+    return _json_response(geojson)
+
+
+@routes.get("/api/sites/{id}/geomap/country-geojson")
+async def geomap_country_geojson(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+    days = _parse_days(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    collector = GeoMapCollector(db)
+    geojson = await collector.generate_country_geojson(site_id, days=days)
+    return _json_response(geojson)
+
+
+@routes.get("/api/sites/{id}/geomap/distribution")
+async def geomap_distribution(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+    days = _parse_days(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    collector = GeoMapCollector(db)
+    distribution = await collector.get_visitor_country_distribution(site_id, days=days)
+    return _json_response(distribution)
+
+
+@routes.get("/api/sites/{id}/geomap/summary")
+async def geomap_summary(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+    days = _parse_days(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    collector = GeoMapCollector(db)
+    summary = await collector.get_geo_summary(site_id, days=days)
+    return _json_response(summary)
+
+
+# ── Retention Analysis ──────────────────────────────────────────────────
+
+
+@routes.get("/api/sites/{id}/retention/daily")
+async def retention_daily(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+    days = _parse_days(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    analyzer = RetentionAnalyzer(db)
+    retention = await analyzer.get_daily_retention(site_id, days=days)
+    return _json_response({"retention": retention, "period_days": days, "group_by": "day"})
+
+
+@routes.get("/api/sites/{id}/retention/weekly")
+async def retention_weekly(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    analyzer = RetentionAnalyzer(db)
+    retention = await analyzer.get_weekly_retention(site_id)
+    return _json_response({"retention": retention, "group_by": "week"})
+
+
+@routes.get("/api/sites/{id}/retention/monthly")
+async def retention_monthly(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    analyzer = RetentionAnalyzer(db)
+    retention = await analyzer.get_monthly_retention(site_id)
+    return _json_response({"retention": retention, "group_by": "month"})
+
+
+@routes.get("/api/sites/{id}/retention/cohort")
+async def retention_cohort(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+    days = _parse_days(request, default=90)
+    group_by = request.query.get("group_by", "week")
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    analyzer = RetentionAnalyzer(db)
+    cohort = await analyzer.get_cohort_analysis(site_id, days=days, group_by=group_by)
+    return _json_response(cohort)
+
+
+@routes.get("/api/sites/{id}/retention/churn")
+async def retention_churn(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+    days = _parse_days(request)
+    inactive_days = 30
+    raw = request.query.get("inactive_days")
+    if raw:
+        try:
+            inactive_days = max(1, min(int(raw), 365))
+        except ValueError:
+            pass
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    analyzer = RetentionAnalyzer(db)
+    churn = await analyzer.get_churn_rate(site_id, days=days, inactive_days=inactive_days)
+    return _json_response(churn)
+
+
+@routes.get("/api/sites/{id}/retention/return-visitors")
+async def retention_return_visitors(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+    days = _parse_days(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    analyzer = RetentionAnalyzer(db)
+    stats = await analyzer.get_return_visitor_stats(site_id, days=days)
+    return _json_response(stats)
+
+
+@routes.get("/api/sites/{id}/retention/summary")
+async def retention_summary(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+    days = _parse_days(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    analyzer = RetentionAnalyzer(db)
+    summary = await analyzer.get_retention_summary(site_id, days=days)
+    return _json_response(summary)
+
+
+# ── A/B Testing ────────────────────────────────────────────────────────
+
+
+@routes.get("/api/sites/{id}/experiments")
+async def list_experiments(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    mgr = ABTestManager(db)
+    experiments = await mgr.get_experiments(site_id)
+    return _json_response({"experiments": experiments})
+
+
+@routes.post("/api/sites/{id}/experiments")
+async def create_experiment(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    name = (body.get("name") or "").strip()
+    description = (body.get("description") or "").strip()
+    variants = body.get("variants", [])
+    traffic_pct = body.get("traffic_pct", 100.0)
+
+    if not name:
+        return _error("Missing 'name' field")
+    if not variants or len(variants) < 2:
+        return _error("At least 2 variants are required")
+
+    mgr = ABTestManager(db)
+    try:
+        experiment = await mgr.create_experiment(
+            site_id=site_id,
+            name=name,
+            variants=variants,
+            description=description,
+            traffic_pct=traffic_pct,
+        )
+    except ValueError as exc:
+        return _error(str(exc))
+
+    return _json_response(experiment, status=201)
+
+
+@routes.get("/api/experiments/{id}")
+async def get_experiment(request: web.Request) -> web.Response:
+    experiment_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    mgr = ABTestManager(db)
+    experiment = await mgr.get_experiment(experiment_id)
+    if not experiment:
+        return _error("Experiment not found", status=404)
+    return _json_response(experiment)
+
+
+@routes.post("/api/experiments/{id}/start")
+async def start_experiment(request: web.Request) -> web.Response:
+    experiment_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    mgr = ABTestManager(db)
+    started = await mgr.start_experiment(experiment_id)
+    if not started:
+        return _error("Experiment not found or already started", status=404)
+    return _json_response({"ok": True, "status": "running"})
+
+
+@routes.post("/api/experiments/{id}/stop")
+async def stop_experiment(request: web.Request) -> web.Response:
+    experiment_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    mgr = ABTestManager(db)
+    stopped = await mgr.stop_experiment(experiment_id)
+    if not stopped:
+        return _error("Experiment not found or not running", status=404)
+    return _json_response({"ok": True, "status": "completed"})
+
+
+@routes.delete("/api/experiments/{id}")
+async def delete_experiment(request: web.Request) -> web.Response:
+    experiment_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    mgr = ABTestManager(db)
+    deleted = await mgr.delete_experiment(experiment_id)
+    if not deleted:
+        return _error("Experiment not found", status=404)
+    return _json_response({"ok": True})
+
+
+@routes.post("/api/experiments/{id}/assign")
+async def assign_visitor_to_variant(request: web.Request) -> web.Response:
+    experiment_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    visitor_id = (body.get("visitor_id") or "").strip()
+    if not visitor_id:
+        return _error("Missing 'visitor_id' field")
+
+    mgr = ABTestManager(db)
+    assignment = await mgr.assign_visitor(experiment_id, visitor_id)
+    if not assignment:
+        return _error("Experiment not found or not running", status=404)
+    return _json_response(assignment)
+
+
+@routes.post("/api/experiments/{id}/convert")
+async def track_ab_conversion(request: web.Request) -> web.Response:
+    experiment_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    visitor_id = (body.get("visitor_id") or "").strip()
+    if not visitor_id:
+        return _error("Missing 'visitor_id' field")
+
+    event_name = body.get("event_name", "conversion")
+    value = body.get("value", 0.0)
+
+    mgr = ABTestManager(db)
+    conversion = await mgr.track_conversion(
+        experiment_id=experiment_id,
+        visitor_id=visitor_id,
+        event_name=event_name,
+        value=float(value),
+    )
+    if not conversion:
+        return _error("Visitor not assigned to this experiment", status=404)
+    return _json_response(conversion, status=201)
+
+
+@routes.get("/api/experiments/{id}/stats")
+async def experiment_stats(request: web.Request) -> web.Response:
+    experiment_id = int(request.match_info["id"])
+    db = _get_db(request)
+    days = _parse_days(request)
+
+    mgr = ABTestManager(db)
+    stats = await mgr.get_experiment_stats(experiment_id, days=days)
+    if not stats:
+        return _error("Experiment not found", status=404)
+    return _json_response(stats)
+
+
+@routes.get("/api/experiments/{id}/significance")
+async def experiment_significance(request: web.Request) -> web.Response:
+    experiment_id = int(request.match_info["id"])
+    db = _get_db(request)
+    days = _parse_days(request)
+
+    mgr = ABTestManager(db)
+    significance = await mgr.get_statistical_significance(experiment_id, days=days)
+    return _json_response(significance)
+
+
+@routes.get("/api/sites/{id}/experiments/summary")
+async def experiments_summary(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+    days = _parse_days(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    mgr = ABTestManager(db)
+    summary = await mgr.get_experiment_summary(site_id, days=days)
+    return _json_response(summary)

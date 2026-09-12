@@ -327,11 +327,82 @@ class Database:
                 created_at       TEXT NOT NULL DEFAULT (datetime('now'))
             );
 
+            CREATE TABLE IF NOT EXISTS visitor_locations (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                site_id     INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+                visitor_id  TEXT NOT NULL,
+                country     TEXT NOT NULL DEFAULT '',
+                city        TEXT NOT NULL DEFAULT '',
+                latitude    REAL,
+                longitude   REAL,
+                ip_address  TEXT NOT NULL DEFAULT '',
+                created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS retention_cohorts (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                site_id     INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+                visitor_id  TEXT NOT NULL,
+                cohort_date TEXT NOT NULL,
+                first_visit TEXT NOT NULL,
+                last_visit  TEXT NOT NULL,
+                visit_count INTEGER NOT NULL DEFAULT 1,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS ab_experiments (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                site_id     INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+                name        TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                status      TEXT NOT NULL DEFAULT 'draft',
+                traffic_pct REAL NOT NULL DEFAULT 100.0,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                ended_at    TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS ab_variants (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                experiment_id   INTEGER NOT NULL REFERENCES ab_experiments(id) ON DELETE CASCADE,
+                name            TEXT NOT NULL,
+                weight          REAL NOT NULL DEFAULT 1.0,
+                is_control      INTEGER NOT NULL DEFAULT 0,
+                created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS ab_assignments (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                experiment_id   INTEGER NOT NULL REFERENCES ab_experiments(id) ON DELETE CASCADE,
+                variant_id      INTEGER NOT NULL REFERENCES ab_variants(id) ON DELETE CASCADE,
+                visitor_id      TEXT NOT NULL,
+                assigned_at     TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(experiment_id, visitor_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS ab_conversions (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                experiment_id   INTEGER NOT NULL REFERENCES ab_experiments(id) ON DELETE CASCADE,
+                variant_id      INTEGER NOT NULL REFERENCES ab_variants(id) ON DELETE CASCADE,
+                visitor_id      TEXT NOT NULL,
+                event_name      TEXT NOT NULL DEFAULT '',
+                value           REAL NOT NULL DEFAULT 0.0,
+                created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
             CREATE INDEX IF NOT EXISTS idx_email_schedules_site_id ON email_schedules(site_id);
             CREATE INDEX IF NOT EXISTS idx_heatmap_clicks_site_id ON heatmap_clicks(site_id);
             CREATE INDEX IF NOT EXISTS idx_heatmap_clicks_page_url ON heatmap_clicks(page_url);
             CREATE INDEX IF NOT EXISTS idx_heatmap_clicks_created_at ON heatmap_clicks(created_at);
             CREATE INDEX IF NOT EXISTS idx_backups_created_at ON backups(created_at);
+            CREATE INDEX IF NOT EXISTS idx_visitor_locations_site_id ON visitor_locations(site_id);
+            CREATE INDEX IF NOT EXISTS idx_visitor_locations_country ON visitor_locations(country);
+            CREATE INDEX IF NOT EXISTS idx_retention_cohorts_site_id ON retention_cohorts(site_id);
+            CREATE INDEX IF NOT EXISTS idx_retention_cohorts_cohort_date ON retention_cohorts(cohort_date);
+            CREATE INDEX IF NOT EXISTS idx_ab_experiments_site_id ON ab_experiments(site_id);
+            CREATE INDEX IF NOT EXISTS idx_ab_variants_experiment_id ON ab_variants(experiment_id);
+            CREATE INDEX IF NOT EXISTS idx_ab_assignments_experiment_id ON ab_assignments(experiment_id);
+            CREATE INDEX IF NOT EXISTS idx_ab_assignments_visitor_id ON ab_assignments(visitor_id);
+            CREATE INDEX IF NOT EXISTS idx_ab_conversions_experiment_id ON ab_conversions(experiment_id);
         """)
 
     # ── inserts ──────────────────────────────────────────────────────────
