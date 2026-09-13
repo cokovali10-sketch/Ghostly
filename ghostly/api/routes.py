@@ -2517,3 +2517,714 @@ async def experiments_summary(request: web.Request) -> web.Response:
     mgr = ABTestManager(db)
     summary = await mgr.get_experiment_summary(site_id, days=days)
     return _json_response(summary)
+
+
+# ── Multi-Tenant ──────────────────────────────────────────────────────
+
+
+def _get_tenant(request: web.Request):
+    from ghostly.core.multi_tenant import TenantManager
+    db = _get_db(request)
+    return TenantManager(db)
+
+
+@routes.get("/api/organizations")
+@require_auth
+async def list_organizations(request: web.Request) -> web.Response:
+    user = _get_user(request)
+    tenant = _get_tenant(request)
+    orgs = await tenant.get_user_organizations(user["user_id"])
+    return _json_response({"organizations": orgs})
+
+
+@routes.post("/api/organizations")
+@require_auth
+async def create_organization(request: web.Request) -> web.Response:
+    user = _get_user(request)
+    tenant = _get_tenant(request)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    name = (body.get("name") or "").strip()
+    plan = body.get("plan", "free")
+    subdomain = body.get("subdomain")
+
+    if not name:
+        return _error("Missing 'name' field")
+
+    try:
+        org = await tenant.create_organization(
+            name=name,
+            owner_user_id=user["user_id"],
+            plan=plan,
+            subdomain=subdomain,
+        )
+    except Exception as exc:
+        return _error(str(exc))
+
+    return _json_response(org, status=201)
+
+
+@routes.get("/api/organizations/{id}")
+@require_auth
+async def get_organization(request: web.Request) -> web.Response:
+    org_id = int(request.match_info["id"])
+    tenant = _get_tenant(request)
+    user = _get_user(request)
+
+    role = await tenant.check_user_role(org_id, user["user_id"])
+    if not role:
+        return _error("Access denied", 403)
+
+    org = await tenant.get_organization(org_id)
+    if not org:
+        return _error("Organization not found", 404)
+    return _json_response(org)
+
+
+@routes.put("/api/organizations/{id}")
+@require_auth
+async def update_organization(request: web.Request) -> web.Response:
+    org_id = int(request.match_info["id"])
+    tenant = _get_tenant(request)
+    user = _get_user(request)
+
+    role = await tenant.check_user_role(org_id, user["user_id"], ["owner", "admin"])
+    if not role:
+        return _error("Insufficient permissions", 403)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    updates = {}
+    for key in ("name", "subdomain", "billing_email", "settings"):
+        if key in body:
+            updates[key] = body[key]
+
+    try:
+        await tenant.update_organization(org_id, **updates)
+    except Exception as exc:
+        return _error(str(exc))
+
+    org = await tenant.get_organization(org_id)
+    return _json_response(org)
+
+
+@routes.delete("/api/organizations/{id}")
+@require_auth
+async def delete_organization(request: web.Request) -> web.Response:
+    org_id = int(request.match_info["id"])
+    tenant = _get_tenant(request)
+    user = _get_user(request)
+
+    role = await tenant.check_user_role(org_id, user["user_id"], ["owner"])
+    if not role:
+        return _error("Only the owner can delete the organization", 403)
+
+    await tenant.delete_organization(org_id)
+    return _json_response({"ok": True})
+
+
+@routes.get("/api/organizations/{id}/members")
+@require_auth
+async def list_org_members(request: web.Request) -> web.Response:
+    org_id = int(request.match_info["id"])
+    tenant = _get_tenant(request)
+    user = _get_user(request)
+
+    role = await tenant.check_user_role(org_id, user["user_id"])
+    if not role:
+        return _error("Access denied", 403)
+
+    members = await tenant.get_members(org_id)
+    return _json_response({"members": members})
+
+
+@routes.post("/api/organizations/{id}/members")
+@require_auth
+async def add_org_member(request: web.Request) -> web.Response:
+    org_id = int(request.match_info["id"])
+    tenant = _get_tenant(request)
+    user = _get_user(request)
+
+    role = await tenant.check_user_role(org_id, user["user_id"], ["owner", "admin"])
+    if not role:
+        return _error("Insufficient permissions", 403)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    target_user_id = body.get("user_id")
+    member_role = body.get("role", "viewer")
+
+    if not target_user_id:
+        return _error("Missing 'user_id'")
+
+    try:
+        member = await tenant.add_member(
+            org_id=org_id,
+            user_id=int(target_user_id),
+            role=member_role,
+            invited_by=user["user_id"],
+        )
+    except Exception as exc:
+        return _error(str(exc))
+
+    return _json_response(member, status=201)
+
+
+@routes.put("/api/organizations/{org_id}/members/{user_id}/role")
+@require_auth
+async def update_org_member_role(request: web.Request) -> web.Response:
+    org_id = int(request.match_info["org_id"])
+    target_user_id = int(request.match_info["user_id"])
+    tenant = _get_tenant(request)
+    user = _get_user(request)
+
+    role = await tenant.check_user_role(org_id, user["user_id"], ["owner", "admin"])
+    if not role:
+        return _error("Insufficient permissions", 403)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    new_role = body.get("role", "")
+    if not new_role:
+        return _error("Missing 'role'")
+
+    try:
+        await tenant.update_member_role(org_id, target_user_id, new_role)
+    except Exception as exc:
+        return _error(str(exc))
+
+    return _json_response({"ok": True})
+
+
+@routes.delete("/api/organizations/{org_id}/members/{user_id}")
+@require_auth
+async def remove_org_member(request: web.Request) -> web.Response:
+    org_id = int(request.match_info["org_id"])
+    target_user_id = int(request.match_info["user_id"])
+    tenant = _get_tenant(request)
+    user = _get_user(request)
+
+    role = await tenant.check_user_role(org_id, user["user_id"], ["owner", "admin"])
+    if not role:
+        return _error("Insufficient permissions", 403)
+
+    try:
+        await tenant.remove_member(org_id, target_user_id)
+    except Exception as exc:
+        return _error(str(exc))
+
+    return _json_response({"ok": True})
+
+
+@routes.get("/api/organizations/{id}/usage")
+@require_auth
+async def org_usage(request: web.Request) -> web.Response:
+    org_id = int(request.match_info["id"])
+    tenant = _get_tenant(request)
+    user = _get_user(request)
+
+    role = await tenant.check_user_role(org_id, user["user_id"])
+    if not role:
+        return _error("Access denied", 403)
+
+    usage = await tenant.get_org_usage(org_id)
+    return _json_response(usage)
+
+
+@routes.get("/api/organizations/{id}/sites")
+@require_auth
+async def org_sites(request: web.Request) -> web.Response:
+    org_id = int(request.match_info["id"])
+    tenant = _get_tenant(request)
+    user = _get_user(request)
+
+    role = await tenant.check_user_role(org_id, user["user_id"])
+    if not role:
+        return _error("Access denied", 403)
+
+    sites = await tenant.get_org_sites(org_id)
+    return _json_response({"sites": sites})
+
+
+@routes.post("/api/organizations/{id}/sites/{site_id}")
+@require_auth
+async def add_site_to_org(request: web.Request) -> web.Response:
+    org_id = int(request.match_info["id"])
+    site_id = int(request.match_info["site_id"])
+    tenant = _get_tenant(request)
+    user = _get_user(request)
+
+    role = await tenant.check_user_role(org_id, user["user_id"], ["owner", "admin"])
+    if not role:
+        return _error("Insufficient permissions", 403)
+
+    try:
+        await tenant.add_site_to_org(org_id, site_id)
+    except Exception as exc:
+        return _error(str(exc))
+
+    return _json_response({"ok": True})
+
+
+@routes.delete("/api/organizations/{id}/sites/{site_id}")
+@require_auth
+async def remove_site_from_org(request: web.Request) -> web.Response:
+    org_id = int(request.match_info["id"])
+    site_id = int(request.match_info["site_id"])
+    tenant = _get_tenant(request)
+    user = _get_user(request)
+
+    role = await tenant.check_user_role(org_id, user["user_id"], ["owner", "admin"])
+    if not role:
+        return _error("Insufficient permissions", 403)
+
+    await tenant.remove_site_from_org(org_id, site_id)
+    return _json_response({"ok": True})
+
+
+@routes.post("/api/organizations/{id}/upgrade")
+@require_auth
+async def upgrade_org_plan(request: web.Request) -> web.Response:
+    org_id = int(request.match_info["id"])
+    tenant = _get_tenant(request)
+    user = _get_user(request)
+
+    role = await tenant.check_user_role(org_id, user["user_id"], ["owner"])
+    if not role:
+        return _error("Only the owner can upgrade the plan", 403)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    new_plan = body.get("plan", "")
+    if not new_plan:
+        return _error("Missing 'plan'")
+
+    try:
+        org = await tenant.upgrade_plan(org_id, new_plan)
+    except Exception as exc:
+        return _error(str(exc))
+
+    return _json_response(org)
+
+
+@routes.get("/api/plans")
+@require_auth
+async def list_plans(request: web.Request) -> web.Response:
+    from ghostly.core.multi_tenant import TenantManager, PLAN_LIMITS, PLAN_PRICING
+    tenant = _get_tenant(request)
+    plans = {}
+    for plan_name in PLAN_LIMITS:
+        plans[plan_name] = {
+            "limits": tenant.get_plan_limits(plan_name),
+            "pricing": PLAN_PRICING[plan_name],
+        }
+    return _json_response({"plans": plans})
+
+
+@routes.get("/api/organizations/{id}/invoices")
+@require_auth
+async def org_invoices(request: web.Request) -> web.Response:
+    org_id = int(request.match_info["id"])
+    tenant = _get_tenant(request)
+    user = _get_user(request)
+
+    role = await tenant.check_user_role(org_id, user["user_id"])
+    if not role:
+        return _error("Access denied", 403)
+
+    invoices = await tenant.get_invoices(org_id)
+    return _json_response({"invoices": invoices})
+
+
+# ── Search ────────────────────────────────────────────────────────────
+
+
+def _get_search(request: web.Request):
+    from ghostly.core.search import SearchEngine
+    db = _get_db(request)
+    return SearchEngine(db)
+
+
+@routes.get("/api/sites/{id}/search")
+@require_auth
+async def search_analytics(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    search_engine = _get_search(request)
+    db = _get_db(request)
+    user = _get_user(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    query = request.query.get("q", "")
+    limit = _parse_limit(request)
+    offset_raw = request.query.get("offset", "0")
+    try:
+        offset = max(0, int(offset_raw))
+    except ValueError:
+        offset = 0
+
+    filters = {}
+    for key in ("country", "device_type", "browser", "path"):
+        val = request.query.get(key)
+        if val:
+            filters[key] = val
+
+    date_from = request.query.get("from")
+    date_to = request.query.get("to")
+    if date_from:
+        filters["start_date"] = date_from
+    if date_to:
+        filters["end_date"] = date_to
+
+    results = await search_engine.search(
+        site_id=site_id,
+        query=query,
+        filters=filters,
+        limit=limit,
+        offset=offset,
+        user_id=user["user_id"],
+    )
+    return _json_response(results)
+
+
+@routes.get("/api/sites/{id}/search/advanced")
+@require_auth
+async def advanced_search(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    search_engine = _get_search(request)
+    db = _get_db(request)
+    user = _get_user(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    results = await search_engine.advanced_search(
+        site_id=site_id,
+        query=request.query.get("q", ""),
+        date_from=request.query.get("from"),
+        date_to=request.query.get("to"),
+        country=request.query.get("country"),
+        device_type=request.query.get("device_type"),
+        browser=request.query.get("browser"),
+        referrer=request.query.get("referrer"),
+        page_pattern=request.query.get("page"),
+        event_name=request.query.get("event"),
+        sort_by=request.query.get("sort_by", "relevance"),
+        sort_order=request.query.get("sort_order", "desc"),
+        limit=_parse_limit(request),
+        user_id=user["user_id"],
+    )
+    return _json_response(results)
+
+
+@routes.get("/api/sites/{id}/search/autocomplete")
+@require_auth
+async def search_autocomplete(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    search_engine = _get_search(request)
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    prefix = request.query.get("q", "")
+    limit = _parse_limit(request, default=10)
+
+    suggestions = await search_engine.autocomplete(site_id, prefix, limit)
+    return _json_response({"suggestions": suggestions})
+
+
+@routes.get("/api/sites/{id}/search/popular")
+@require_auth
+async def popular_searches(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    search_engine = _get_search(request)
+    db = _get_db(request)
+    days = _parse_days(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    popular = await search_engine.get_popular_searches(site_id, days=days)
+    return _json_response({"popular_searches": popular})
+
+
+@routes.get("/api/auth/search-history")
+@require_auth
+async def search_history(request: web.Request) -> web.Response:
+    search_engine = _get_search(request)
+    user = _get_user(request)
+    limit = _parse_limit(request, default=20)
+
+    history = await search_engine.get_search_history(user["user_id"], limit)
+    return _json_response({"history": history})
+
+
+# ── Scheduler ─────────────────────────────────────────────────────────
+
+
+def _get_scheduler(request: web.Request):
+    from ghostly.core.scheduler import TaskScheduler
+    db = _get_db(request)
+    return TaskScheduler(db)
+
+
+@routes.get("/api/scheduler/tasks")
+@require_role("admin")
+async def list_scheduler_tasks(request: web.Request) -> web.Response:
+    scheduler = _get_scheduler(request)
+    tasks = scheduler.get_all_tasks()
+    return _json_response({"tasks": tasks})
+
+
+@routes.get("/api/scheduler/tasks/{name}")
+@require_role("admin")
+async def get_scheduler_task(request: web.Request) -> web.Response:
+    scheduler = _get_scheduler(request)
+    name = request.match_info["name"]
+    task = scheduler.get_task_status(name)
+    if not task:
+        return _error("Task not found", status=404)
+    return _json_response(task)
+
+
+@routes.post("/api/scheduler/tasks/{name}/enable")
+@require_role("admin")
+async def enable_scheduler_task(request: web.Request) -> web.Response:
+    scheduler = _get_scheduler(request)
+    name = request.match_info["name"]
+    enabled = await scheduler.enable_task(name)
+    if not enabled:
+        return _error("Task not found", status=404)
+    return _json_response({"ok": True, "enabled": True})
+
+
+@routes.post("/api/scheduler/tasks/{name}/disable")
+@require_role("admin")
+async def disable_scheduler_task(request: web.Request) -> web.Response:
+    scheduler = _get_scheduler(request)
+    name = request.match_info["name"]
+    disabled = await scheduler.disable_task(name)
+    if not disabled:
+        return _error("Task not found", status=404)
+    return _json_response({"ok": True, "enabled": False})
+
+
+@routes.post("/api/scheduler/tasks/{name}/run")
+@require_role("admin")
+async def run_scheduler_task(request: web.Request) -> web.Response:
+    scheduler = _get_scheduler(request)
+    name = request.match_info["name"]
+    result = await scheduler.run_task_now(name)
+    if "error" in result:
+        return _error(result["error"], status=404)
+    return _json_response(result)
+
+
+@routes.get("/api/scheduler/jobs")
+@require_role("admin")
+async def list_scheduled_jobs(request: web.Request) -> web.Response:
+    scheduler = _get_scheduler(request)
+    org_id_raw = request.query.get("org_id")
+    org_id = int(org_id_raw) if org_id_raw else None
+    jobs = await scheduler.get_scheduled_jobs(org_id)
+    return _json_response({"jobs": jobs})
+
+
+@routes.post("/api/scheduler/jobs")
+@require_role("admin")
+async def create_scheduled_job(request: web.Request) -> web.Response:
+    scheduler = _get_scheduler(request)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    name = (body.get("name") or "").strip()
+    cron_expr = body.get("cron_expr", "* * * * *")
+    job_type = (body.get("job_type") or "").strip()
+    config = body.get("config", {})
+    org_id = body.get("org_id")
+
+    if not name or not job_type:
+        return _error("Missing 'name' or 'job_type'")
+
+    job_id = await scheduler.add_scheduled_job(
+        name=name,
+        cron_expr=cron_expr,
+        job_type=job_type,
+        config=config,
+        org_id=int(org_id) if org_id else None,
+    )
+    return _json_response({"id": job_id, "ok": True}, status=201)
+
+
+@routes.put("/api/scheduler/jobs/{id}")
+@require_role("admin")
+async def update_scheduled_job(request: web.Request) -> web.Response:
+    scheduler = _get_scheduler(request)
+    job_id = int(request.match_info["id"])
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error("Invalid JSON body")
+
+    updates = {}
+    for key in ("name", "cron_expr", "config", "is_active"):
+        if key in body:
+            updates[key] = body[key]
+
+    updated = await scheduler.update_scheduled_job(job_id, **updates)
+    if not updated:
+        return _error("Job not found", status=404)
+    return _json_response({"ok": True})
+
+
+@routes.delete("/api/scheduler/jobs/{id}")
+@require_role("admin")
+async def delete_scheduled_job(request: web.Request) -> web.Response:
+    scheduler = _get_scheduler(request)
+    job_id = int(request.match_info["id"])
+
+    deleted = await scheduler.delete_scheduled_job(job_id)
+    if not deleted:
+        return _error("Job not found", status=404)
+    return _json_response({"ok": True})
+
+
+@routes.get("/api/scheduler/jobs/{id}/logs")
+@require_role("admin")
+async def get_job_logs(request: web.Request) -> web.Response:
+    scheduler = _get_scheduler(request)
+    job_id = int(request.match_info["id"])
+    limit = _parse_limit(request, default=50)
+
+    logs = await scheduler.get_job_logs(job_id, limit)
+    return _json_response({"logs": logs})
+
+
+# ── Realtime ──────────────────────────────────────────────────────────
+
+
+def _get_realtime(request: web.Request):
+    from ghostly.core.realtime import RealtimeManager
+    db = _get_db(request)
+    return RealtimeManager(db)
+
+
+@routes.get("/api/sites/{id}/realtime/live")
+@require_auth
+async def realtime_live(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    realtime = _get_realtime(request)
+    snapshot = realtime.get_realtime_snapshot(site_id)
+    return _json_response(snapshot)
+
+
+@routes.get("/api/sites/{id}/realtime/active-by-page")
+@require_auth
+async def realtime_active_by_page(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    realtime = _get_realtime(request)
+    by_page = realtime.get_active_by_page(site_id)
+    return _json_response({"active_by_page": by_page})
+
+
+@routes.get("/api/sites/{id}/realtime/geo")
+@require_auth
+async def realtime_geographic(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    realtime = _get_realtime(request)
+    geo = realtime.get_geographic_distribution(site_id)
+    return _json_response(geo)
+
+
+@routes.get("/api/sites/{id}/realtime/sources")
+@require_auth
+async def realtime_traffic_sources(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    realtime = _get_realtime(request)
+    sources = realtime.get_traffic_sources(site_id)
+    return _json_response(sources)
+
+
+@routes.get("/api/sites/{id}/realtime/visitors")
+@require_auth
+async def realtime_visitor_list(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    realtime = _get_realtime(request)
+    visitors = realtime.get_visitor_list(site_id)
+    return _json_response({"visitors": visitors, "total": len(visitors)})
+
+
+@routes.get("/api/sites/{id}/realtime/history")
+@require_auth
+async def realtime_history(request: web.Request) -> web.Response:
+    site_id = int(request.match_info["id"])
+    db = _get_db(request)
+    minutes_raw = request.query.get("minutes", "60")
+    try:
+        minutes = max(1, min(int(minutes_raw), 1440))
+    except ValueError:
+        minutes = 60
+
+    site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
+    if not site:
+        return _error("Site not found", status=404)
+
+    realtime = _get_realtime(request)
+    history = await realtime.get_historical_snapshots(site_id, minutes=minutes)
+    return _json_response({"history": history, "minutes": minutes})

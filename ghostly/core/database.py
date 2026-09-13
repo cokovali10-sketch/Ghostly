@@ -465,6 +465,138 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_ab_assignments_experiment_id ON ab_assignments(experiment_id);
             CREATE INDEX IF NOT EXISTS idx_ab_assignments_visitor_id ON ab_assignments(visitor_id);
             CREATE INDEX IF NOT EXISTS idx_ab_conversions_experiment_id ON ab_conversions(experiment_id);
+
+            CREATE TABLE IF NOT EXISTS organizations (
+                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+                name                  TEXT NOT NULL,
+                plan                  TEXT NOT NULL DEFAULT 'free',
+                subdomain             TEXT NOT NULL UNIQUE,
+                owner_user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                is_active             INTEGER NOT NULL DEFAULT 1,
+                max_sites             INTEGER NOT NULL DEFAULT 3,
+                max_pageviews_monthly INTEGER NOT NULL DEFAULT 100000,
+                max_team_members      INTEGER NOT NULL DEFAULT 2,
+                max_api_keys          INTEGER NOT NULL DEFAULT 5,
+                retention_days        INTEGER NOT NULL DEFAULT 30,
+                billing_email         TEXT NOT NULL DEFAULT '',
+                settings              TEXT NOT NULL DEFAULT '{}',
+                created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at            TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS org_members (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                org_id     INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+                user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                role       TEXT NOT NULL DEFAULT 'viewer',
+                invited_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                joined_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(org_id, user_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS org_sites (
+                id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                org_id  INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+                site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+                UNIQUE(org_id, site_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS usage_records (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                org_id      INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+                usage_type  TEXT NOT NULL,
+                amount      INTEGER NOT NULL DEFAULT 1,
+                recorded_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS invoices (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                org_id          INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+                invoice_id      TEXT NOT NULL UNIQUE,
+                amount          REAL NOT NULL DEFAULT 0,
+                currency        TEXT NOT NULL DEFAULT 'USD',
+                description     TEXT NOT NULL DEFAULT '',
+                billing_period  TEXT NOT NULL DEFAULT 'monthly',
+                status          TEXT NOT NULL DEFAULT 'pending',
+                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS scheduled_tasks (
+                name         TEXT PRIMARY KEY,
+                cron_expr    TEXT NOT NULL DEFAULT '* * * * *',
+                enabled      INTEGER NOT NULL DEFAULT 1,
+                last_run     TEXT,
+                next_run     TEXT,
+                run_count    INTEGER NOT NULL DEFAULT 0,
+                error_count  INTEGER NOT NULL DEFAULT 0,
+                last_error   TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS scheduled_jobs (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                name        TEXT NOT NULL,
+                cron_expr   TEXT NOT NULL,
+                job_type    TEXT NOT NULL,
+                config      TEXT NOT NULL DEFAULT '{}',
+                org_id      INTEGER REFERENCES organizations(id) ON DELETE CASCADE,
+                is_active   INTEGER NOT NULL DEFAULT 1,
+                created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS job_run_logs (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id      INTEGER NOT NULL REFERENCES scheduled_jobs(id) ON DELETE CASCADE,
+                status      TEXT NOT NULL DEFAULT 'success',
+                duration_ms REAL NOT NULL DEFAULT 0,
+                error       TEXT,
+                ran_at      TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS search_history (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                site_id       INTEGER REFERENCES sites(id) ON DELETE SET NULL,
+                query         TEXT NOT NULL,
+                results_count INTEGER NOT NULL DEFAULT 0,
+                created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS realtime_snapshots (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                site_id          INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+                active_visitors  INTEGER NOT NULL DEFAULT 0,
+                data             TEXT NOT NULL DEFAULT '{}',
+                created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS daily_aggregates (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                site_id         INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+                aggregate_date  TEXT NOT NULL,
+                data            TEXT NOT NULL DEFAULT '{}',
+                created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE(site_id, aggregate_date)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_organizations_subdomain ON organizations(subdomain);
+            CREATE INDEX IF NOT EXISTS idx_organizations_owner ON organizations(owner_user_id);
+            CREATE INDEX IF NOT EXISTS idx_org_members_org_id ON org_members(org_id);
+            CREATE INDEX IF NOT EXISTS idx_org_members_user_id ON org_members(user_id);
+            CREATE INDEX IF NOT EXISTS idx_org_sites_org_id ON org_sites(org_id);
+            CREATE INDEX IF NOT EXISTS idx_org_sites_site_id ON org_sites(site_id);
+            CREATE INDEX IF NOT EXISTS idx_usage_records_org_id ON usage_records(org_id);
+            CREATE INDEX IF NOT EXISTS idx_usage_records_type ON usage_records(usage_type);
+            CREATE INDEX IF NOT EXISTS idx_invoices_org_id ON invoices(org_id);
+            CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_org_id ON scheduled_jobs(org_id);
+            CREATE INDEX IF NOT EXISTS idx_job_run_logs_job_id ON job_run_logs(job_id);
+            CREATE INDEX IF NOT EXISTS idx_search_history_user_id ON search_history(user_id);
+            CREATE INDEX IF NOT EXISTS idx_search_history_site_id ON search_history(site_id);
+            CREATE INDEX IF NOT EXISTS idx_search_history_query ON search_history(query);
+            CREATE INDEX IF NOT EXISTS idx_realtime_snapshots_site_id ON realtime_snapshots(site_id);
+            CREATE INDEX IF NOT EXISTS idx_realtime_snapshots_created_at ON realtime_snapshots(created_at);
+            CREATE INDEX IF NOT EXISTS idx_daily_aggregates_site_id ON daily_aggregates(site_id);
+            CREATE INDEX IF NOT EXISTS idx_daily_aggregates_date ON daily_aggregates(aggregate_date);
         """)
 
     # ── inserts ──────────────────────────────────────────────────────────

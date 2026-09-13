@@ -144,6 +144,27 @@ async def error_middleware(request: web.Request, handler):
         )
 
 
+# ── Tenant middleware ─────────────────────────────────────────────────
+
+
+@web.middleware
+async def tenant_middleware(request: web.Request, handler):
+    host = request.headers.get("Host", "")
+    if host and "." in host:
+        try:
+            from ghostly.core.multi_tenant import TenantManager
+            db: Database | None = request.app.get("db")
+            if db:
+                tenant_mgr = TenantManager(db)
+                org = await tenant_mgr.resolve_subdomain(host)
+                if org:
+                    request["organization"] = org
+                    request["org_id"] = org["id"]
+        except Exception:
+            pass
+    return await handler(request)
+
+
 # ── Theme middleware ─────────────────────────────────────────────────────
 
 
@@ -223,6 +244,9 @@ async def health_check(request: web.Request) -> web.Response:
     ws_manager: WebSocketManager = request.app.get("ws_manager")
     ws_status = "running" if ws_manager else "not_configured"
 
+    scheduler = request.app.get("scheduler")
+    scheduler_status = "running" if scheduler else "not_configured"
+
     all_ok = db_status == "connected" and auth_status == "ready"
     status_code = 200 if all_ok else 503
 
@@ -230,10 +254,12 @@ async def health_check(request: web.Request) -> web.Response:
         {
             "status": "ok" if all_ok else "degraded",
             "service": "ghostly",
+            "version": "6.0.0",
             "components": {
                 "database": db_status,
                 "auth": auth_status,
                 "websocket": ws_status,
+                "scheduler": scheduler_status,
             },
             "timestamp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
         },
@@ -263,8 +289,55 @@ async def on_startup(app: web.Application) -> None:
     loaded = await plugin_mgr.load_all_plugins()
     logger.info("Plugin manager ready (%d plugins loaded)", loaded)
 
+    from ghostly.core.scheduler import (
+        TaskScheduler, ReportGenerator, DataAggregator, DataCleanup, EmailReportSender,
+    )
+    scheduler = TaskScheduler(db)
+    report_gen = ReportGenerator(db)
+    aggregator = DataAggregator(db)
+    cleanup = DataCleanup(db)
+    email_sender = EmailReportSender(db)
+
+    scheduler.register_task("data_cleanup", lambda: cleanup.run_full_cleanup(), "0 2 * * *")
+    scheduler.register_task("daily_aggregation", lambda: _run_daily_aggregation(db, aggregator), "0 3 * * *")
+    scheduler.register_task("email_reports", lambda: email_sender.send_scheduled_reports(), "0 8 * * 1")
+    scheduler.register_task("snapshot_realtime", lambda: _run_realtime_snapshot(db), "*/5 * * * *")
+
+    await scheduler.start()
+    app["scheduler"] = scheduler
+    app["report_generator"] = report_gen
+    app["data_aggregator"] = aggregator
+    app["data_cleanup"] = cleanup
+    app["email_report_sender"] = email_sender
+    logger.info("Background scheduler started with registered tasks")
+
+
+async def _run_daily_aggregation(db: Database, aggregator) -> None:
+    sites = await db._fetch_all("SELECT id FROM sites WHERE is_active=1")
+    for site in sites:
+        try:
+            await aggregator.run_aggregation(site["id"])
+        except Exception as exc:
+            logger.warning("Aggregation failed for site %s: %s", site["id"], exc)
+
+
+async def _run_realtime_snapshot(db: Database) -> None:
+    from ghostly.core.realtime import RealtimeManager
+    realtime = RealtimeManager(db)
+    sites = await db._fetch_all("SELECT id FROM sites WHERE is_active=1")
+    for site in sites:
+        try:
+            await realtime.persist_snapshot(site["id"])
+        except Exception as exc:
+            logger.warning("Realtime snapshot failed for site %s: %s", site["id"], exc)
+
 
 async def on_cleanup(app: web.Application) -> None:
+    scheduler = app.get("scheduler")
+    if scheduler:
+        await scheduler.stop()
+        logger.info("Scheduler stopped")
+
     plugin_mgr: PluginManager = app["plugin_manager"]
     await plugin_mgr.unload_all()
     logger.info("Plugins unloaded")
@@ -286,6 +359,7 @@ def create_app(
     middlewares = [
         error_middleware,
         rate_limit_middleware,
+        tenant_middleware,
         cors_middleware,
         security_middleware,
         logging_middleware,
@@ -336,7 +410,7 @@ def create_app(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="ghostly-server",
-        description="Ghostly – privacy-focused analytics server",
+        description="Ghostly v6.0 – privacy-focused analytics server with multi-tenant support",
     )
     parser.add_argument(
         "--host", default=DEFAULT_HOST,
