@@ -1,16 +1,20 @@
 from __future__ import annotations
 
-import json
 import logging
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .database import Database
+# --- константы вынесены FORGE refactor ---
+CONST_20 = 20
+CONST_30 = 30
+CONST_50000 = 50000
+
 
 logger = logging.getLogger("ghostly.heatmap")
 
-GRID_SIZE = 20
+GRID_SIZE = CONST_20
 SECTION_COLS = 5
 SECTION_ROWS = 4
 
@@ -54,7 +58,7 @@ class HeatmapCollector:
         site_id: int,
         *,
         page_url: str | None = None,
-        days: int = 30,
+        days: int = CONST_30,
         limit: int = 5000,
     ) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
@@ -82,10 +86,10 @@ class HeatmapCollector:
         site_id: int,
         *,
         page_url: str | None = None,
-        days: int = 30,
+        days: int = CONST_30,
         grid_size: int = GRID_SIZE,
     ) -> dict[str, Any]:
-        clicks = await self.get_clicks(site_id, page_url=page_url, days=days, limit=50000)
+        clicks = await self.get_clicks(site_id, page_url=page_url, days=days, limit=CONST_50000)
 
         if not clicks:
             return {"grid": [], "total_clicks": 0, "grid_size": grid_size, "pages": []}
@@ -118,9 +122,9 @@ class HeatmapCollector:
         site_id: int,
         *,
         page_url: str | None = None,
-        days: int = 30,
+        days: int = CONST_30,
     ) -> dict[str, Any]:
-        clicks = await self.get_clicks(site_id, page_url=page_url, days=days, limit=50000)
+        clicks = await self.get_clicks(site_id, page_url=page_url, days=days, limit=CONST_50000)
 
         if not clicks:
             return {"sections": [], "total_clicks": 0}
@@ -162,8 +166,8 @@ class HeatmapCollector:
         site_id: int,
         *,
         page_url: str | None = None,
-        days: int = 30,
-        limit: int = 20,
+        days: int = CONST_30,
+        limit: int = CONST_20,
     ) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
@@ -186,8 +190,8 @@ class HeatmapCollector:
     async def get_page_click_counts(
         self,
         site_id: int,
-        days: int = 30,
-        limit: int = 30,
+        days: int = CONST_30,
+        limit: int = CONST_30,
     ) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         return await self.db._fetch_all(

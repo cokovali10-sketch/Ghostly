@@ -8,6 +8,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .database import Database
+# --- константы вынесены FORGE refactor ---
+CONST_500 = 500
+
 
 logger = logging.getLogger("ghostly.export")
 
@@ -180,7 +183,7 @@ class ExportManager:
             html_parts.append("    </tr></thead>")
             html_parts.append("    <tbody>")
 
-            for row in rows[:500]:
+            for row in rows[:CONST_500]:
                 html_parts.append("    <tr>")
                 for value in row.values():
                     html_parts.append(f"      <td>{value}</td>")
@@ -189,7 +192,7 @@ class ExportManager:
             html_parts.append("    </tbody>")
             html_parts.append("  </table>")
 
-            if len(rows) > 500:
+            if len(rows) > CONST_500:
                 html_parts.append(f"  <p class='meta'>Showing 500 of {len(rows)} records.</p>")
 
         html_parts.extend([

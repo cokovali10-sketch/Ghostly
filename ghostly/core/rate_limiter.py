@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
+# --- константы вынесены FORGE refactor ---
+CONST_60 = 60.0
+CONST_3600 = 3600.0
+
 
 
 @dataclass
@@ -66,13 +69,13 @@ class RateLimiter:
 
     WINDOW_SECONDS: dict[str, float] = {
         "1s": 1.0,
-        "1m": 60.0,
-        "1h": 3600.0,
+        "1m": CONST_60,
+        "1h": CONST_3600,
     }
 
     def __init__(
         self,
-        requests_per_minute: int = 60,
+        requests_per_minute: int = CONST_60,
         requests_per_hour: int = 1000,
         burst_size: int = 10,
     ) -> None:
@@ -104,23 +107,23 @@ class RateLimiter:
         window: str = "1m",
     ) -> dict[str, Any]:
         key = f"{scope}:{identifier}"
-        window_seconds = self.WINDOW_SECONDS.get(window, 60.0)
+        window_seconds = self.WINDOW_SECONDS.get(window, CONST_60)
 
         if window == "1s":
             capacity = self._burst_size
             rate = self._burst_size
         elif window == "1h":
             capacity = self._requests_per_hour
-            rate = self._requests_per_hour / 3600.0
+            rate = self._requests_per_hour / CONST_3600
         else:
             capacity = self._requests_per_minute
-            rate = self._requests_per_minute / 60.0
+            rate = self._requests_per_minute / CONST_60
 
         async with self._lock:
             bucket = self._get_bucket(key, capacity, rate)
             allowed, remaining = bucket.consume()
 
-            reset_time = time.monotonic() + (1.0 / rate if rate > 0 else 60.0)
+            reset_time = time.monotonic() + (1.0 / rate if rate > 0 else CONST_60)
 
             return {
                 "allowed": allowed,
@@ -137,7 +140,7 @@ class RateLimiter:
         window: str = "1m",
     ) -> dict[str, Any]:
         key = f"{scope}:{identifier}"
-        window_seconds = self.WINDOW_SECONDS.get(window, 60.0)
+        window_seconds = self.WINDOW_SECONDS.get(window, CONST_60)
 
         if window == "1s":
             max_requests = self._burst_size

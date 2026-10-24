@@ -7,6 +7,10 @@ from enum import Enum
 from typing import Any
 
 from .database import Database
+# --- константы вынесены FORGE refactor ---
+CONST_30 = 30
+CONST_60 = 60.0
+
 
 logger = logging.getLogger("ghostly.alerts")
 
@@ -31,7 +35,7 @@ class AlertManager:
         self.db = db
         self._active_alerts: dict[int, dict[str, Any]] = {}
         self._last_check: dict[int, float] = {}
-        self._check_interval: float = 60.0
+        self._check_interval: float = CONST_60
 
     async def create_alert(
         self,
@@ -40,7 +44,7 @@ class AlertManager:
         alert_type: str,
         threshold: float,
         window_minutes: int = 5,
-        cooldown_minutes: int = 30,
+        cooldown_minutes: int = CONST_30,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Create a new alert for a site."""
@@ -235,8 +239,8 @@ class AlertManager:
         try:
             last_dt = datetime.fromisoformat(last_triggered)
             now = datetime.now(timezone.utc)
-            cooldown = alert.get("cooldown_minutes", 30)
-            elapsed = (now - last_dt).total_seconds() / 60
+            cooldown = alert.get("cooldown_minutes", CONST_30)
+            elapsed = (now - last_dt).total_seconds() / CONST_60
             return elapsed < cooldown
         except (ValueError, TypeError):
             return False

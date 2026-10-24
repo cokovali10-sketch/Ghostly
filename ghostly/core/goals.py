@@ -5,6 +5,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .database import Database
+# --- константы вынесены FORGE refactor ---
+CONST_30 = 30
+
 
 logger = logging.getLogger("ghostly.goals")
 
@@ -147,7 +150,7 @@ class GoalManager:
             "goal_name": goal["name"],
         }
 
-    async def get_goal_stats(self, goal_id: int, days: int = 30) -> dict[str, Any]:
+    async def get_goal_stats(self, goal_id: int, days: int = CONST_30) -> dict[str, Any]:
         """Calculate goal completion statistics."""
         goal = await self.get_goal(goal_id)
         if not goal:
@@ -177,7 +180,7 @@ class GoalManager:
             "daily_completions": daily,
         }
 
-    async def get_all_goals_stats(self, site_id: int, days: int = 30) -> list[dict[str, Any]]:
+    async def get_all_goals_stats(self, site_id: int, days: int = CONST_30) -> list[dict[str, Any]]:
         """Get stats for all goals on a site."""
         goals = await self.get_goals(site_id)
         results = []

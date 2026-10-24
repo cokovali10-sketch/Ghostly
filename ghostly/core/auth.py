@@ -12,6 +12,15 @@ import bcrypt
 import jwt
 
 from .database import Database
+# --- константы вынесены FORGE refactor ---
+CONST_16 = 16
+CONST_32 = 32
+CONST_400 = 400
+CONST_401 = 401
+CONST_403 = 403
+CONST_404 = 404
+CONST_1000 = 1000
+
 
 logger = logging.getLogger("ghostly.auth")
 
@@ -23,7 +32,7 @@ LOCKOUT_DURATION_MINUTES = 30
 
 
 class AuthError(Exception):
-    def __init__(self, message: str, status: int = 401) -> None:
+    def __init__(self, message: str, status: int = CONST_401) -> None:
         self.message = message
         self.status = status
         super().__init__(message)
@@ -40,7 +49,7 @@ class AuthManager:
         refresh_token_expiry: int = DEFAULT_REFRESH_TOKEN_EXPIRY,
     ) -> None:
         self.db = db
-        self.secret_key = secret_key or secrets.token_hex(32)
+        self.secret_key = secret_key or secrets.token_hex(CONST_32)
         self.access_token_expiry = access_token_expiry
         self.refresh_token_expiry = refresh_token_expiry
         self._rate_limit_window: int = 3600
@@ -68,7 +77,7 @@ class AuthManager:
             "role": role,
             "iat": int(now.timestamp()),
             "exp": int(expiry.timestamp()),
-            "jti": secrets.token_hex(16),
+            "jti": secrets.token_hex(CONST_16),
         }
         return jwt.encode(payload, self.secret_key, algorithm="HS256")
 
@@ -77,9 +86,9 @@ class AuthManager:
             payload = jwt.decode(token, self.secret_key, algorithms=["HS256"])
             return payload
         except jwt.ExpiredSignatureError:
-            raise AuthError("Token has expired", 401)
+            raise AuthError("Token has expired", CONST_401)
         except jwt.InvalidTokenError:
-            raise AuthError("Invalid token", 401)
+            raise AuthError("Invalid token", CONST_401)
 
     def _check_password_strength(self, password: str) -> str | None:
         if len(password) < 8:
@@ -101,14 +110,14 @@ class AuthManager:
     ) -> dict[str, Any]:
         email = email.strip().lower()
         if not email or "@" not in email:
-            raise AuthError("Invalid email address", 400)
+            raise AuthError("Invalid email address", CONST_400)
 
         strength_error = self._check_password_strength(password)
         if strength_error:
-            raise AuthError(strength_error, 400)
+            raise AuthError(strength_error, CONST_400)
 
         if role not in ROLES_HIERARCHY:
-            raise AuthError(f"Invalid role. Must be one of: {', '.join(ROLES_HIERARCHY.keys())}", 400)
+            raise AuthError(f"Invalid role. Must be one of: {', '.join(ROLES_HIERARCHY.keys())}", CONST_400)
 
         existing = await self.db.get_user_by_email(email)
         if existing:
@@ -122,7 +131,7 @@ class AuthManager:
         access_token = self.generate_token(user_id, "access", role)
         refresh_token = self.generate_token(user_id, "refresh", role)
 
-        session_id = secrets.token_hex(16)
+        session_id = secrets.token_hex(CONST_16)
         now = datetime.now(timezone.utc)
         expires_at = (now + timedelta(seconds=self.refresh_token_expiry)).isoformat()
         await self.db.create_user_session(session_id, user_id, refresh_token, expires_at)
@@ -147,11 +156,11 @@ class AuthManager:
 
         if not user:
             await self.db.log_audit(None, "login_failed", "user", {"email": email, "reason": "not_found"}, ip)
-            raise AuthError("Invalid email or password", 401)
+            raise AuthError("Invalid email or password", CONST_401)
 
         if not user["is_active"]:
             await self.db.log_audit(user["id"], "login_blocked", "user", {"reason": "account_disabled"}, ip)
-            raise AuthError("Account is disabled", 403)
+            raise AuthError("Account is disabled", CONST_403)
 
         if user["locked_until"]:
             try:
@@ -173,14 +182,14 @@ class AuthManager:
                 logger.warning("Account locked due to failed attempts: %s", email)
             await self.db.update_user(user["id"], **update)
             await self.db.log_audit(user["id"], "login_failed", "user", {"reason": "bad_password", "attempts": failed_attempts}, ip)
-            raise AuthError("Invalid email or password", 401)
+            raise AuthError("Invalid email or password", CONST_401)
 
         await self.db.update_user(user["id"], failed_attempts=0, locked_until=None, last_login=datetime.now(timezone.utc).isoformat())
 
         access_token = self.generate_token(user["id"], "access", user["role"])
         refresh_token = self.generate_token(user["id"], "refresh", user["role"])
 
-        session_id = secrets.token_hex(16)
+        session_id = secrets.token_hex(CONST_16)
         now = datetime.now(timezone.utc)
         expires_at = (now + timedelta(seconds=self.refresh_token_expiry)).isoformat()
         await self.db.create_user_session(session_id, user["id"], refresh_token, expires_at)
@@ -200,16 +209,16 @@ class AuthManager:
         payload = self.decode_token(refresh_token)
 
         if payload.get("type") != "refresh":
-            raise AuthError("Invalid token type", 401)
+            raise AuthError("Invalid token type", CONST_401)
 
         user_id = payload["sub"]
         user = await self.db.get_user_full(user_id)
 
         if not user:
-            raise AuthError("User not found", 401)
+            raise AuthError("User not found", CONST_401)
 
         if not user["is_active"]:
-            raise AuthError("Account is disabled", 403)
+            raise AuthError("Account is disabled", CONST_403)
 
         access_token = self.generate_token(user_id, "access", user["role"])
         new_refresh_token = self.generate_token(user_id, "refresh", user["role"])
@@ -233,22 +242,22 @@ class AuthManager:
     async def authenticate_request(self, request: Any) -> dict[str, Any]:
         auth_header = request.headers.get("Authorization", "")
         if not auth_header.startswith("Bearer "):
-            raise AuthError("Missing or invalid Authorization header", 401)
+            raise AuthError("Missing or invalid Authorization header", CONST_401)
 
         token = auth_header[7:]
         payload = self.decode_token(token)
 
         if payload.get("type") != "access":
-            raise AuthError("Invalid token type", 401)
+            raise AuthError("Invalid token type", CONST_401)
 
         user_id = payload["sub"]
         user = await self.db.get_user_by_id(user_id)
 
         if not user:
-            raise AuthError("User not found", 401)
+            raise AuthError("User not found", CONST_401)
 
         if not user["is_active"]:
-            raise AuthError("Account is disabled", 403)
+            raise AuthError("Account is disabled", CONST_403)
 
         return {
             "user_id": user["id"],
@@ -276,14 +285,14 @@ class AuthManager:
     ) -> bool:
         user = await self.db.get_user_full(user_id)
         if not user:
-            raise AuthError("User not found", 404)
+            raise AuthError("User not found", CONST_404)
 
         if not self.verify_password(current_password, user["password_hash"]):
-            raise AuthError("Current password is incorrect", 401)
+            raise AuthError("Current password is incorrect", CONST_401)
 
         strength_error = self._check_password_strength(new_password)
         if strength_error:
-            raise AuthError(strength_error, 400)
+            raise AuthError(strength_error, CONST_400)
 
         new_hash = self.hash_password(new_password)
         await self.db.update_user(user_id, password_hash=new_hash)
@@ -300,7 +309,7 @@ class AuthManager:
         if not user:
             return None
 
-        token = secrets.token_urlsafe(32)
+        token = secrets.token_urlsafe(CONST_32)
         token_hash = hashlib.sha256(token.encode()).hexdigest()
         now = datetime.now(timezone.utc)
         expires_at = (now + timedelta(hours=1)).isoformat()
@@ -321,18 +330,18 @@ class AuthManager:
         reset = await self.db.get_password_reset(token_hash)
 
         if not reset:
-            raise AuthError("Invalid or expired reset token", 400)
+            raise AuthError("Invalid or expired reset token", CONST_400)
 
         try:
             expires_at = datetime.fromisoformat(reset["expires_at"])
             if datetime.now(timezone.utc) > expires_at:
-                raise AuthError("Reset token has expired", 400)
+                raise AuthError("Reset token has expired", CONST_400)
         except (ValueError, TypeError):
-            raise AuthError("Invalid reset token", 400)
+            raise AuthError("Invalid reset token", CONST_400)
 
         strength_error = self._check_password_strength(new_password)
         if strength_error:
-            raise AuthError(strength_error, 400)
+            raise AuthError(strength_error, CONST_400)
 
         new_hash = self.hash_password(new_password)
         await self.db.update_user(reset["user_id"], password_hash=new_hash)
@@ -348,7 +357,7 @@ class AuthManager:
         user_id: int,
         name: str,
         permissions: list[str] | None = None,
-        rate_limit: int = 1000,
+        rate_limit: int = CONST_1000,
         expires_in_days: int | None = None,
         ip: str = "",
     ) -> dict[str, Any]:
@@ -409,7 +418,7 @@ class AuthManager:
         if not key_info:
             return {"allowed": False, "remaining": 0, "reset_at": 0, "error": "Invalid API key"}
 
-        rate_limit = key_info["rate_limit"] or 1000
+        rate_limit = key_info["rate_limit"] or CONST_1000
         key_id = str(key_info["id"])
 
         now = time.time()
@@ -457,11 +466,11 @@ class AuthManager:
 
     async def update_user_role(self, admin_id: int, target_user_id: int, new_role: str, ip: str = "") -> bool:
         if new_role not in ROLES_HIERARCHY:
-            raise AuthError(f"Invalid role: {new_role}", 400)
+            raise AuthError(f"Invalid role: {new_role}", CONST_400)
 
         target = await self.db.get_user_by_id(target_user_id)
         if not target:
-            raise AuthError("User not found", 404)
+            raise AuthError("User not found", CONST_404)
 
         await self.db.update_user(target_user_id, role=new_role)
         await self.db.log_audit(admin_id, "role_change", "user", {"target_user_id": target_user_id, "new_role": new_role}, ip)
@@ -472,12 +481,12 @@ class AuthManager:
     async def deactivate_user(self, admin_id: int, target_user_id: int, ip: str = "") -> bool:
         target = await self.db.get_user_by_id(target_user_id)
         if not target:
-            raise AuthError("User not found", 404)
+            raise AuthError("User not found", CONST_404)
 
         if target["role"] == "admin":
             admin_count = await self.db._fetch_one("SELECT COUNT(*) as c FROM users WHERE role='admin' AND is_active=1")
             if admin_count and admin_count["c"] <= 1:
-                raise AuthError("Cannot deactivate the last admin", 400)
+                raise AuthError("Cannot deactivate the last admin", CONST_400)
 
         await self.db.update_user(target_user_id, is_active=0)
         await self.db.delete_user_sessions(target_user_id)
@@ -489,7 +498,7 @@ class AuthManager:
     async def activate_user(self, admin_id: int, target_user_id: int, ip: str = "") -> bool:
         target = await self.db.get_user_by_id(target_user_id)
         if not target:
-            raise AuthError("User not found", 404)
+            raise AuthError("User not found", CONST_404)
 
         await self.db.update_user(target_user_id, is_active=1)
         await self.db.log_audit(admin_id, "user_activate", "user", {"target_user_id": target_user_id}, ip)
@@ -500,12 +509,12 @@ class AuthManager:
     async def delete_user_account(self, admin_id: int, target_user_id: int, ip: str = "") -> bool:
         target = await self.db.get_user_by_id(target_user_id)
         if not target:
-            raise AuthError("User not found", 404)
+            raise AuthError("User not found", CONST_404)
 
         if target["role"] == "admin":
             admin_count = await self.db._fetch_one("SELECT COUNT(*) as c FROM users WHERE role='admin' AND is_active=1")
             if admin_count and admin_count["c"] <= 1:
-                raise AuthError("Cannot delete the last admin", 400)
+                raise AuthError("Cannot delete the last admin", CONST_400)
 
         await self.db.delete_user(target_user_id)
         await self.db.log_audit(admin_id, "user_delete", "user", {"target_user_id": target_user_id, "email": target["email"]}, ip)

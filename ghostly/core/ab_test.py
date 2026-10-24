@@ -3,11 +3,15 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
-import random
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .database import Database
+# --- константы вынесены FORGE refactor ---
+CONST_0_05 = 0.05
+CONST_30 = 30
+CONST_10000 = 10000
+
 
 logger = logging.getLogger("ghostly.ab_test")
 
@@ -129,7 +133,7 @@ class ABTestManager:
     def _get_visitor_variant_hash(self, experiment_id: int, visitor_id: str) -> int:
         raw = f"ghostly-ab-{experiment_id}-{visitor_id}"
         hash_val = int(hashlib.sha256(raw.encode()).hexdigest(), 16)
-        return hash_val % 10000
+        return hash_val % CONST_10000
 
     async def assign_visitor(
         self, experiment_id: int, visitor_id: str
@@ -162,7 +166,7 @@ class ABTestManager:
             return None
 
         hash_val = self._get_visitor_variant_hash(experiment_id, visitor_id)
-        normalized = (hash_val / 10000) * total_weight
+        normalized = (hash_val / CONST_10000) * total_weight
 
         cumulative = 0.0
         selected_variant = variants[0]
@@ -216,7 +220,7 @@ class ABTestManager:
         }
 
     async def get_experiment_stats(
-        self, experiment_id: int, days: int = 30
+        self, experiment_id: int, days: int = CONST_30
     ) -> dict[str, Any]:
         experiment = await self.get_experiment(experiment_id)
         if not experiment:
@@ -313,7 +317,7 @@ class ABTestManager:
         return 2.0 * p
 
     async def get_statistical_significance(
-        self, experiment_id: int, days: int = 30
+        self, experiment_id: int, days: int = CONST_30
     ) -> dict[str, Any]:
         stats = await self.get_experiment_stats(experiment_id, days)
         if not stats or not stats.get("variants"):
@@ -343,7 +347,7 @@ class ABTestManager:
             )
             p_value = self._z_score_to_p_value(z_score)
             confidence = round((1 - p_value) * 100, 2)
-            is_significant = p_value < 0.05
+            is_significant = p_value < CONST_0_05
 
             if is_significant:
                 any_significant = True
@@ -360,11 +364,11 @@ class ABTestManager:
             "experiment_id": experiment_id,
             "period_days": days,
             "is_significant": any_significant,
-            "significance_level": 0.05,
+            "significance_level": CONST_0_05,
             "variants": results,
         }
 
-    async def get_experiment_summary(self, site_id: int, days: int = 30) -> dict[str, Any]:
+    async def get_experiment_summary(self, site_id: int, days: int = CONST_30) -> dict[str, Any]:
         experiments = await self.get_experiments(site_id)
         active = [e for e in experiments if e["status"] == "running"]
         completed = [e for e in experiments if e["status"] == "completed"]

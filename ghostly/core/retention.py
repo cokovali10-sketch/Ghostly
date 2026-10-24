@@ -6,6 +6,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .database import Database
+# --- константы вынесены FORGE refactor ---
+CONST_7 = 7
+CONST_12 = 12
+CONST_30 = 30
+
 
 logger = logging.getLogger("ghostly.retention")
 
@@ -17,7 +22,7 @@ class RetentionAnalyzer:
         self.db = db
 
     async def get_daily_retention(
-        self, site_id: int, days: int = 30
+        self, site_id: int, days: int = CONST_30
     ) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         visitors = await self.db._fetch_all(
@@ -65,7 +70,7 @@ class RetentionAnalyzer:
         return retention_data
 
     async def get_weekly_retention(
-        self, site_id: int, weeks: int = 12
+        self, site_id: int, weeks: int = CONST_12
     ) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(weeks=weeks)).isoformat()
         visitors = await self.db._fetch_all(
@@ -94,7 +99,7 @@ class RetentionAnalyzer:
             if cohort_size == 0:
                 continue
 
-            weeks_since = (this_week_start - cohort_week).days // 7
+            weeks_since = (this_week_start - cohort_week).days // CONST_7
             week_retention = []
             for week_offset in range(0, weeks_since + 1):
                 check_week_start = cohort_week + timedelta(weeks=week_offset)
@@ -120,7 +125,7 @@ class RetentionAnalyzer:
         return retention_data
 
     async def get_monthly_retention(
-        self, site_id: int, months: int = 12
+        self, site_id: int, months: int = CONST_12
     ) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(days=months * 31)).isoformat()
         visitors = await self.db._fetch_all(
@@ -135,7 +140,7 @@ class RetentionAnalyzer:
 
         monthly_map: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for v in visitors:
-            cohort_month = v["first_visit"][:7]
+            cohort_month = v["first_visit"][:CONST_7]
             monthly_map[cohort_month].append(v)
 
         today = datetime.now(timezone.utc).date()
@@ -149,18 +154,18 @@ class RetentionAnalyzer:
 
             cohort_month_date = datetime.strptime(cohort_month_str, "%Y-%m").date()
             this_month_date = datetime.strptime(this_month, "%Y-%m").date()
-            months_since = (this_month_date.year - cohort_month_date.year) * 12 + (
+            months_since = (this_month_date.year - cohort_month_date.year) * CONST_12 + (
                 this_month_date.month - cohort_month_date.month
             )
 
             month_retention = []
             for month_offset in range(0, months_since + 1):
-                m = (cohort_month_date.month + month_offset - 1) % 12 + 1
-                y = cohort_month_date.year + (cohort_month_date.month + month_offset - 1) // 12
+                m = (cohort_month_date.month + month_offset - 1) % CONST_12 + 1
+                y = cohort_month_date.year + (cohort_month_date.month + month_offset - 1) // CONST_12
                 check_month = f"{y:04d}-{m:02d}"
                 retained = sum(
                     1 for v in cohort_visitors
-                    if v["last_visit"][:7] >= check_month and v["first_visit"][:7] <= check_month
+                    if v["last_visit"][:CONST_7] >= check_month and v["first_visit"][:CONST_7] <= check_month
                 )
                 retention_rate = round(retained / cohort_size * 100, 2) if cohort_size else 0
                 month_retention.append({
@@ -198,7 +203,7 @@ class RetentionAnalyzer:
                 week_start = cohort_date - timedelta(days=cohort_date.weekday())
                 key = week_start.isoformat()
             elif group_by == "month":
-                key = v["first_visit"][:7]
+                key = v["first_visit"][:CONST_7]
             else:
                 key = v["first_visit"]
             cohorts[key].append(v)
@@ -234,7 +239,7 @@ class RetentionAnalyzer:
         }
 
     async def get_churn_rate(
-        self, site_id: int, days: int = 30, inactive_days: int = 30
+        self, site_id: int, days: int = CONST_30, inactive_days: int = CONST_30
     ) -> dict[str, Any]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         cutoff = (datetime.now(timezone.utc) - timedelta(days=inactive_days)).isoformat()
@@ -258,8 +263,8 @@ class RetentionAnalyzer:
 
         monthly_churn = []
         for month_offset in range(3):
-            month_start = (datetime.now(timezone.utc) - timedelta(days=30 * (month_offset + 1))).isoformat()
-            month_end = (datetime.now(timezone.utc) - timedelta(days=30 * month_offset)).isoformat()
+            month_start = (datetime.now(timezone.utc) - timedelta(days=CONST_30 * (month_offset + 1))).isoformat()
+            month_end = (datetime.now(timezone.utc) - timedelta(days=CONST_30 * month_offset)).isoformat()
             month_active = await self.db._fetch_one(
                 """SELECT COUNT(DISTINCT visitor_id) AS count
                    FROM pageviews WHERE site_id=? AND created_at>=? AND created_at<?""",
@@ -274,7 +279,7 @@ class RetentionAnalyzer:
             mt = month_total["count"] if month_total else 0
             mc = mt - ma
             monthly_churn.append({
-                "period": f"{month_offset * 30}-{(month_offset + 1) * 30} days ago",
+                "period": f"{month_offset * CONST_30}-{(month_offset + 1) * CONST_30} days ago",
                 "total_visitors": mt,
                 "active_visitors": ma,
                 "churned_visitors": mc,
@@ -292,7 +297,7 @@ class RetentionAnalyzer:
         }
 
     async def get_return_visitor_stats(
-        self, site_id: int, days: int = 30
+        self, site_id: int, days: int = CONST_30
     ) -> dict[str, Any]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         visitors = await self.db._fetch_all(
@@ -342,7 +347,7 @@ class RetentionAnalyzer:
             "frequency_distribution": dict(freq_dist),
         }
 
-    async def get_retention_summary(self, site_id: int, days: int = 30) -> dict[str, Any]:
+    async def get_retention_summary(self, site_id: int, days: int = CONST_30) -> dict[str, Any]:
         return_visitor_stats = await self.get_return_visitor_stats(site_id, days)
         churn_data = await self.get_churn_rate(site_id, days)
         cohort_data = await self.get_cohort_analysis(site_id, days, group_by="week")

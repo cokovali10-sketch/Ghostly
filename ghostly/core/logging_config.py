@@ -8,6 +8,9 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+# --- константы вынесены FORGE refactor ---
+CONST_1024 = 1024
+
 
 
 class JSONFormatter(logging.Formatter):
@@ -61,7 +64,7 @@ def setup_logging(
     log_level: str = "INFO",
     log_dir: str | Path | None = None,
     json_output: bool = True,
-    max_bytes: int = 10 * 1024 * 1024,
+    max_bytes: int = 10 * CONST_1024 * CONST_1024,
     backup_count: int = 30,
 ) -> None:
     """Configure structured logging with rotation."""

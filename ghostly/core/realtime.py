@@ -9,6 +9,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, AsyncIterator
 
 from ghostly.core.database import Database
+# --- константы вынесены FORGE refactor ---
+CONST_60 = 60
+CONST_300 = 300
+
 
 logger = logging.getLogger("ghostly.realtime")
 
@@ -24,7 +28,7 @@ class RealtimeManager:
         self._source_data: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
         self._lock = asyncio.Lock()
         self._max_events = 500
-        self._cleanup_interval = 60
+        self._cleanup_interval = CONST_60
         self._last_cleanup = time.monotonic()
 
     async def track_visitor(self, site_id: int, visitor_id: str, page: str = "/", country: str = "", referrer: str = "") -> None:
@@ -83,7 +87,7 @@ class RealtimeManager:
                 self._events[site_id] = self._events[site_id][-self._max_events:]
         await self._broadcast(site_id, event)
 
-    def get_active_visitors(self, site_id: int, window_seconds: int = 300) -> dict[str, Any]:
+    def get_active_visitors(self, site_id: int, window_seconds: int = CONST_300) -> dict[str, Any]:
         now = time.time()
         cutoff = now - window_seconds
         visitors = {}
@@ -102,7 +106,7 @@ class RealtimeManager:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-    def get_active_by_page(self, site_id: int, window_seconds: int = 300) -> dict[str, int]:
+    def get_active_by_page(self, site_id: int, window_seconds: int = CONST_300) -> dict[str, int]:
         now = time.time()
         cutoff = now - window_seconds
         pages: dict[str, int] = defaultdict(int)
@@ -111,7 +115,7 @@ class RealtimeManager:
                 pages[data["page"]] += 1
         return dict(pages)
 
-    def get_visitor_list(self, site_id: int, window_seconds: int = 300) -> list[dict[str, Any]]:
+    def get_visitor_list(self, site_id: int, window_seconds: int = CONST_300) -> list[dict[str, Any]]:
         now = time.time()
         cutoff = now - window_seconds
         result = []
@@ -148,8 +152,8 @@ class RealtimeManager:
         }
 
     def get_realtime_snapshot(self, site_id: int) -> dict[str, Any]:
-        active = self.get_active_visitors(site_id, window_seconds=300)
-        active_1m = self.get_active_visitors(site_id, window_seconds=60)
+        active = self.get_active_visitors(site_id, window_seconds=CONST_300)
+        active_1m = self.get_active_visitors(site_id, window_seconds=CONST_60)
         geo = self.get_geographic_distribution(site_id)
         sources = self.get_traffic_sources(site_id)
         recent_events = self._events.get(site_id, [])[-20:]
@@ -257,7 +261,7 @@ class RealtimeManager:
         except Exception as exc:
             logger.warning("Failed to persist realtime snapshot: %s", exc)
 
-    async def get_historical_snapshots(self, site_id: int, minutes: int = 60) -> list[dict[str, Any]]:
+    async def get_historical_snapshots(self, site_id: int, minutes: int = CONST_60) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
         rows = await self.db._fetch_all(
             """SELECT active_visitors, data, created_at

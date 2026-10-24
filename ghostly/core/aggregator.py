@@ -4,6 +4,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .database import Database
+# --- константы вынесены FORGE refactor ---
+CONST_7 = 7
+
 
 
 class Aggregator:
@@ -39,7 +42,7 @@ class Aggregator:
             "avg_daily_unique": round(total_unique / len(raw), 1),
         }
 
-    async def aggregate_hourly(self, site_id: int, days: int = 7) -> dict[str, Any]:
+    async def aggregate_hourly(self, site_id: int, days: int = CONST_7) -> dict[str, Any]:
         raw = await self.db.get_hourly_stats(site_id, days)
         hours_map = {f"{h:02d}": 0 for h in range(24)}
         for row in raw:
@@ -91,9 +94,9 @@ class Aggregator:
     # ── trends (this week vs last week) ──────────────────────────────────
 
     async def get_trends(self, site_id: int) -> dict[str, Any]:
-        this_week = self._iso_ago(days=7)
+        this_week = self._iso_ago(days=CONST_7)
         last_week_start = self._iso_ago(days=14)
-        last_week_end = self._iso_ago(days=7)
+        last_week_end = self._iso_ago(days=CONST_7)
 
         this_row = await self.db._fetch_one(
             """SELECT COUNT(*) AS views, COUNT(DISTINCT visitor_id) AS unique_visitors

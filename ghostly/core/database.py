@@ -1,14 +1,16 @@
 from __future__ import annotations
 
-import asyncio
 import json
-import sqlite3
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
 import aiosqlite
+# --- константы вынесены FORGE refactor ---
+CONST_30 = 30
+CONST_50 = 50
+CONST_1000 = 1000
+
 
 
 DB_PATH = Path(__file__).parent.parent / "ghostly_data.db"
@@ -799,7 +801,7 @@ class Database:
         name: str,
         key_hash: str,
         permissions: str = '["read"]',
-        rate_limit: int = 1000,
+        rate_limit: int = CONST_1000,
         expires_at: str | None = None,
     ) -> int:
         cursor = await self.db.execute(
@@ -908,7 +910,7 @@ class Database:
             "active_sessions": sessions["total"] if sessions else 0,
         }
 
-    async def get_site_stats(self, site_id: int, days: int = 30) -> dict[str, Any]:
+    async def get_site_stats(self, site_id: int, days: int = CONST_30) -> dict[str, Any]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         total = await self._fetch_one(
             "SELECT COUNT(*) AS total FROM pageviews WHERE site_id=? AND created_at>=?",
@@ -942,7 +944,7 @@ class Database:
             "bounce_rate": round(bounced_count / total_sessions * 100, 1) if total_sessions else 0,
         }
 
-    async def get_page_stats(self, site_id: int, days: int = 30, limit: int = 50) -> list[dict[str, Any]]:
+    async def get_page_stats(self, site_id: int, days: int = CONST_30, limit: int = CONST_50) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         return await self._fetch_all(
             """SELECT path, COUNT(*) AS views, COUNT(DISTINCT visitor_id) AS unique_visitors
@@ -951,7 +953,7 @@ class Database:
             (site_id, since, limit),
         )
 
-    async def get_visitor_stats(self, site_id: int, days: int = 30) -> dict[str, Any]:
+    async def get_visitor_stats(self, site_id: int, days: int = CONST_30) -> dict[str, Any]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         returning = await self._fetch_one(
             "SELECT COUNT(*) AS returning FROM visitors WHERE site_id=? AND visits > 1 AND last_seen>=?",
@@ -970,7 +972,7 @@ class Database:
             "return_rate": round(r / t * 100, 1) if t else 0,
         }
 
-    async def get_referrer_stats(self, site_id: int, days: int = 30, limit: int = 30) -> list[dict[str, Any]]:
+    async def get_referrer_stats(self, site_id: int, days: int = CONST_30, limit: int = CONST_30) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         return await self._fetch_all(
             """SELECT domain, url, SUM(visits) AS visits
@@ -979,7 +981,7 @@ class Database:
             (site_id, since, limit),
         )
 
-    async def get_device_stats(self, site_id: int, days: int = 30) -> list[dict[str, Any]]:
+    async def get_device_stats(self, site_id: int, days: int = CONST_30) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         return await self._fetch_all(
             """SELECT device_type, COUNT(*) AS views
@@ -988,7 +990,7 @@ class Database:
             (site_id, since),
         )
 
-    async def get_browser_stats(self, site_id: int, days: int = 30) -> list[dict[str, Any]]:
+    async def get_browser_stats(self, site_id: int, days: int = CONST_30) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         return await self._fetch_all(
             """SELECT browser, COUNT(*) AS views
@@ -997,7 +999,7 @@ class Database:
             (site_id, since),
         )
 
-    async def get_country_stats(self, site_id: int, days: int = 30, limit: int = 50) -> list[dict[str, Any]]:
+    async def get_country_stats(self, site_id: int, days: int = CONST_30, limit: int = CONST_50) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         return await self._fetch_all(
             """SELECT country, COUNT(*) AS views
@@ -1006,7 +1008,7 @@ class Database:
             (site_id, since, limit),
         )
 
-    async def get_daily_stats(self, site_id: int, days: int = 30) -> list[dict[str, Any]]:
+    async def get_daily_stats(self, site_id: int, days: int = CONST_30) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         return await self._fetch_all(
             """SELECT date(created_at) AS day, COUNT(*) AS views, COUNT(DISTINCT visitor_id) AS unique_visitors
@@ -1024,7 +1026,7 @@ class Database:
             (site_id, since),
         )
 
-    async def get_retention(self, site_id: int, days: int = 30) -> dict[str, Any]:
+    async def get_retention(self, site_id: int, days: int = CONST_30) -> dict[str, Any]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         rows = await self._fetch_all(
             """SELECT visitor_id, MIN(created_at) AS first_visit, MAX(created_at) AS last_visit,
@@ -1044,7 +1046,7 @@ class Database:
             "repeat_visitors": sum(1 for v in visits if v > 1),
         }
 
-    async def search(self, site_id: int, query: str, limit: int = 50) -> list[dict[str, Any]]:
+    async def search(self, site_id: int, query: str, limit: int = CONST_50) -> list[dict[str, Any]]:
         pattern = f"%{query}%"
         return await self._fetch_all(
             """SELECT DISTINCT path, title, COUNT(*) AS views
@@ -1061,7 +1063,7 @@ class Database:
         name: str,
         key_hash: str,
         permissions: str = '["read"]',
-        rate_limit: int = 1000,
+        rate_limit: int = CONST_1000,
         expires_at: str | None = None,
     ) -> int:
         cursor = await self.db.execute(
@@ -1102,7 +1104,7 @@ class Database:
         alert_type: str,
         threshold: float,
         window_minutes: int = 5,
-        cooldown_minutes: int = 30,
+        cooldown_minutes: int = CONST_30,
         metadata: str = "{}",
     ) -> int:
         cursor = await self.db.execute(
@@ -1174,7 +1176,7 @@ class Database:
         await self.db.commit()
         return cursor.lastrowid or 0
 
-    async def get_alert_history(self, site_id: int, limit: int = 50) -> list[dict[str, Any]]:
+    async def get_alert_history(self, site_id: int, limit: int = CONST_50) -> list[dict[str, Any]]:
         return await self._fetch_all(
             """SELECT h.id, h.alert_id, a.name as alert_name, h.alert_type,
                       h.current_value, h.threshold, h.triggered_at
@@ -1270,7 +1272,7 @@ class Database:
         await self.db.commit()
         return cursor.lastrowid or 0
 
-    async def get_funnel_stats(self, funnel_id: int, days: int = 30) -> dict[str, Any]:
+    async def get_funnel_stats(self, funnel_id: int, days: int = CONST_30) -> dict[str, Any]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         steps = await self.get_funnel_steps(funnel_id)
         if not steps:
@@ -1371,7 +1373,7 @@ class Database:
         await self.db.commit()
         return cursor.lastrowid or 0
 
-    async def get_goal_stats(self, goal_id: int, days: int = 30) -> dict[str, Any]:
+    async def get_goal_stats(self, goal_id: int, days: int = CONST_30) -> dict[str, Any]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         goal = await self.get_goal(goal_id)
         if not goal:
@@ -1412,7 +1414,7 @@ class Database:
         await self.db.commit()
         return cursor.lastrowid or 0
 
-    async def get_export_history(self, site_id: int, limit: int = 50) -> list[dict[str, Any]]:
+    async def get_export_history(self, site_id: int, limit: int = CONST_50) -> list[dict[str, Any]]:
         return await self._fetch_all(
             """SELECT id, format, data_types, created_at
                FROM exports WHERE site_id=? ORDER BY created_at DESC LIMIT ?""",

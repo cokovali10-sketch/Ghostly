@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import secrets
@@ -8,16 +7,28 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ghostly.core.database import Database
+# --- константы вынесены FORGE refactor ---
+CONST_3 = 3
+CONST_5 = 5
+CONST_30 = 30
+CONST_50 = 50
+CONST_63 = 63
+CONST_403 = 403
+CONST_404 = 404
+CONST_409 = 409
+CONST_999 = 999
+CONST_100000 = 100000
+
 
 logger = logging.getLogger("ghostly.multi_tenant")
 
 PLAN_LIMITS = {
     "free": {
-        "max_sites": 3,
-        "max_pageviews_monthly": 100_000,
+        "max_sites": CONST_3,
+        "max_pageviews_monthly": CONST_100000,
         "max_team_members": 2,
-        "max_api_keys": 5,
-        "retention_days": 30,
+        "max_api_keys": CONST_5,
+        "retention_days": CONST_30,
         "realtime_enabled": False,
         "heatmaps_enabled": False,
         "ab_testing_enabled": False,
@@ -31,7 +42,7 @@ PLAN_LIMITS = {
         "max_sites": 25,
         "max_pageviews_monthly": 5_000_000,
         "max_team_members": 15,
-        "max_api_keys": 50,
+        "max_api_keys": CONST_50,
         "retention_days": 365,
         "realtime_enabled": True,
         "heatmaps_enabled": True,
@@ -43,11 +54,11 @@ PLAN_LIMITS = {
         "priority_support": False,
     },
     "enterprise": {
-        "max_sites": 999,
+        "max_sites": CONST_999,
         "max_pageviews_monthly": 999_999_999,
-        "max_team_members": 999,
-        "max_api_keys": 999,
-        "retention_days": 999,
+        "max_team_members": CONST_999,
+        "max_api_keys": CONST_999,
+        "retention_days": CONST_999,
         "realtime_enabled": True,
         "heatmaps_enabled": True,
         "ab_testing_enabled": True,
@@ -98,7 +109,7 @@ class TenantManager:
             "SELECT id FROM organizations WHERE subdomain=?", (subdomain,)
         )
         if existing:
-            raise TenantError("Subdomain already taken", 409)
+            raise TenantError("Subdomain already taken", CONST_409)
 
         plan_config = PLAN_LIMITS[plan]
         cursor = await self.db.db.execute(
@@ -196,20 +207,20 @@ class TenantManager:
 
         org = await self.get_organization(org_id)
         if not org:
-            raise TenantError("Organization not found", 404)
+            raise TenantError("Organization not found", CONST_404)
 
         member_count = await self.db._fetch_one(
             "SELECT COUNT(*) as total FROM org_members WHERE org_id=?", (org_id,)
         )
         count = member_count["total"] if member_count else 0
         if count >= org.get("max_team_members", 2):
-            raise TenantError("Team member limit reached for your plan", 403)
+            raise TenantError("Team member limit reached for your plan", CONST_403)
 
         existing = await self.db._fetch_one(
             "SELECT id FROM org_members WHERE org_id=? AND user_id=?", (org_id, user_id)
         )
         if existing:
-            raise TenantError("User is already a member", 409)
+            raise TenantError("User is already a member", CONST_409)
 
         cursor = await self.db.db.execute(
             """INSERT INTO org_members (org_id, user_id, role, invited_by)
@@ -302,14 +313,14 @@ class TenantManager:
     async def add_site_to_org(self, org_id: int, site_id: int) -> bool:
         org = await self.get_organization(org_id)
         if not org:
-            raise TenantError("Organization not found", 404)
+            raise TenantError("Organization not found", CONST_404)
 
         site_count = await self.db._fetch_one(
             "SELECT COUNT(*) as total FROM org_sites WHERE org_id=?", (org_id,)
         )
         count = site_count["total"] if site_count else 0
-        if count >= org.get("max_sites", 3):
-            raise TenantError("Site limit reached for your plan", 403)
+        if count >= org.get("max_sites", CONST_3):
+            raise TenantError("Site limit reached for your plan", CONST_403)
 
         existing = await self.db._fetch_one(
             "SELECT id FROM org_sites WHERE org_id=? AND site_id=?", (org_id, site_id)
@@ -371,13 +382,13 @@ class TenantManager:
         return {
             "plan": org.get("plan", "free"),
             "sites_used": site_count,
-            "max_sites": org.get("max_sites", 3),
+            "max_sites": org.get("max_sites", CONST_3),
             "team_members_used": member_count,
             "max_team_members": org.get("max_team_members", 2),
             "pageviews_this_month": pageviews_this_month,
-            "max_pageviews_monthly": org.get("max_pageviews_monthly", 100_000),
+            "max_pageviews_monthly": org.get("max_pageviews_monthly", CONST_100000),
             "api_keys_used": api_key_count,
-            "max_api_keys": org.get("max_api_keys", 5),
+            "max_api_keys": org.get("max_api_keys", CONST_5),
             "pageview_usage_pct": round(
                 pageviews_this_month / max(org.get("max_pageviews_monthly", 1), 1) * 100, 1
             ),
@@ -412,7 +423,7 @@ class TenantManager:
         await self.db.db.commit()
 
     async def get_usage_records(
-        self, org_id: int, usage_type: str | None = None, days: int = 30
+        self, org_id: int, usage_type: str | None = None, days: int = CONST_30
     ) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         if usage_type:
@@ -440,7 +451,7 @@ class TenantManager:
     ) -> dict[str, Any]:
         org = await self.get_organization(org_id)
         if not org:
-            raise TenantError("Organization not found", 404)
+            raise TenantError("Organization not found", CONST_404)
 
         invoice_id = secrets.token_hex(8)
         cursor = await self.db.db.execute(
@@ -455,7 +466,7 @@ class TenantManager:
             "SELECT * FROM invoices WHERE id=?", (cursor.lastrowid,)
         )
 
-    async def get_invoices(self, org_id: int, limit: int = 50) -> list[dict[str, Any]]:
+    async def get_invoices(self, org_id: int, limit: int = CONST_50) -> list[dict[str, Any]]:
         return await self.db._fetch_all(
             """SELECT * FROM invoices WHERE org_id=? ORDER BY created_at DESC LIMIT ?""",
             (org_id, limit),
@@ -475,16 +486,16 @@ class TenantManager:
 
     async def resolve_subdomain(self, hostname: str) -> dict[str, Any] | None:
         parts = hostname.split(".")
-        if len(parts) < 3:
+        if len(parts) < CONST_3:
             return None
         subdomain = parts[0]
         return await self.get_organization_by_subdomain(subdomain)
 
     async def validate_subdomain(self, subdomain: str) -> dict[str, Any]:
         subdomain = subdomain.lower().strip()
-        if len(subdomain) < 3:
+        if len(subdomain) < CONST_3:
             return {"valid": False, "error": "Subdomain must be at least 3 characters"}
-        if len(subdomain) > 63:
+        if len(subdomain) > CONST_63:
             return {"valid": False, "error": "Subdomain must be at most 63 characters"}
         if not subdomain[0].isalpha():
             return {"valid": False, "error": "Subdomain must start with a letter"}
@@ -512,7 +523,7 @@ class TenantManager:
 
         org = await self.get_organization(org_id)
         if not org:
-            raise TenantError("Organization not found", 404)
+            raise TenantError("Organization not found", CONST_404)
 
         new_config = PLAN_LIMITS[new_plan]
         await self.update_organization(
@@ -550,4 +561,4 @@ class TenantManager:
         sub = re.sub(r"[^a-z0-9]", "", name.lower().replace(" ", ""))
         if not sub or not sub[0].isalpha():
             sub = "org" + sub
-        return sub[:63]
+        return sub[:CONST_63]

@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ghostly.core.database import Database
+# --- константы вынесены FORGE refactor ---
+CONST_30 = 30
+CONST_50 = 50
+
 
 logger = logging.getLogger("ghostly.search")
 
@@ -20,7 +23,7 @@ class SearchEngine:
         site_id: int,
         query: str,
         filters: dict[str, Any] | None = None,
-        limit: int = 50,
+        limit: int = CONST_50,
         offset: int = 0,
         user_id: int | None = None,
     ) -> dict[str, Any]:
@@ -290,7 +293,7 @@ class SearchEngine:
         return [r["query"] for r in recent]
 
     async def get_popular_searches(
-        self, site_id: int, days: int = 30, limit: int = 10
+        self, site_id: int, days: int = CONST_30, limit: int = 10
     ) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         return await self.db._fetch_all(
@@ -338,7 +341,7 @@ class SearchEngine:
         min_views: int | None = None,
         sort_by: str = "relevance",
         sort_order: str = "desc",
-        limit: int = 50,
+        limit: int = CONST_50,
         offset: int = 0,
         user_id: int | None = None,
     ) -> dict[str, Any]:
@@ -401,7 +404,7 @@ class SearchEngine:
             elif query_lower in text_lower:
                 score += 60.0
             elif any(w in text_lower for w in query_lower.split()):
-                score += 30.0
+                score += CONST_30
 
         words = query_lower.split()
         for word in words:

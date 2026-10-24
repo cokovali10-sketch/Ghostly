@@ -7,6 +7,10 @@ import time
 from typing import Any
 
 from aiohttp import web
+# --- константы вынесены FORGE refactor ---
+CONST_5 = 5.0
+CONST_1024 = 1024
+
 
 logger = logging.getLogger("ghostly.websocket")
 
@@ -227,7 +231,7 @@ class WebSocketManager:
                 break
             except Exception as exc:
                 logger.error("Batch broadcast error: %s", exc)
-                await asyncio.sleep(5.0)
+                await asyncio.sleep(CONST_5)
 
     async def _process_batch(self) -> None:
         """Process a batch of queued messages."""
@@ -271,7 +275,7 @@ class WebSocketManager:
                 break
             except Exception as exc:
                 logger.error("Heartbeat error: %s", exc)
-                await asyncio.sleep(5.0)
+                await asyncio.sleep(CONST_5)
 
     async def _ping_all_clients(self) -> None:
         """Send ping to all connected clients and close unresponsive ones."""
@@ -339,7 +343,7 @@ class WebSocketHandler:
 
         ws = web.WebSocketResponse(
             heartbeat=self.manager._ping_interval,
-            max_msg_size=1024 * 1024,
+            max_msg_size=CONST_1024 * CONST_1024,
             autoclose=True,
             autoping=True,
         )

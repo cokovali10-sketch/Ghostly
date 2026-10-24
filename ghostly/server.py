@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import logging
-import sys
 import time
 from pathlib import Path
 
@@ -15,6 +13,11 @@ from ghostly.core.database import Database
 from ghostly.core.plugins import PluginManager
 from ghostly.core.themes import ThemeManager
 from ghostly.core.websocket import WebSocketManager, WebSocketHandler
+# --- константы вынесены FORGE refactor ---
+CONST_200 = 200
+CONST_501 = 501
+CONST_1000 = 1000
+
 
 logger = logging.getLogger("ghostly")
 
@@ -89,11 +92,11 @@ async def logging_middleware(request: web.Request, handler):
     except web.HTTPException:
         raise
     except Exception as exc:
-        elapsed = (time.monotonic() - start) * 1000
+        elapsed = (time.monotonic() - start) * CONST_1000
         logger.error("Unhandled error on %s %s (%.1fms): %s", method, path, elapsed, exc)
         raise
 
-    elapsed = (time.monotonic() - start) * 1000
+    elapsed = (time.monotonic() - start) * CONST_1000
     if not skip_logging:
         logger.info("%s %s -> %d (%.1fms)", method, path, response.status, elapsed)
 
@@ -112,7 +115,7 @@ async def rate_limit_middleware(request: web.Request, handler):
 
     auth: AuthManager | None = request.app.get("auth")
     if auth:
-        allowed = await auth.check_ip_rate_limit(ip, limit=200)
+        allowed = await auth.check_ip_rate_limit(ip, limit=CONST_200)
         if not allowed:
             logger.warning("Rate limit exceeded for IP %s", ip)
             return web.json_response(
@@ -215,7 +218,7 @@ async def dashboard_index(request: web.Request) -> web.Response:
         html = render_template("index.html")
         return web.Response(text=html, content_type="text/html")
     except FileNotFoundError:
-        return web.Response(text="<h1>Dashboard not configured</h1>", status=501, content_type="text/html")
+        return web.Response(text="<h1>Dashboard not configured</h1>", status=CONST_501, content_type="text/html")
 
 
 async def dashboard_site(request: web.Request) -> web.Response:
@@ -224,7 +227,7 @@ async def dashboard_site(request: web.Request) -> web.Response:
         html = render_template("site.html", {"site_id": site_id})
         return web.Response(text=html, content_type="text/html")
     except FileNotFoundError:
-        return web.Response(text="<h1>Site dashboard not configured</h1>", status=501, content_type="text/html")
+        return web.Response(text="<h1>Site dashboard not configured</h1>", status=CONST_501, content_type="text/html")
 
 
 # ── Health check handler ────────────────────────────────────────────────
@@ -248,7 +251,7 @@ async def health_check(request: web.Request) -> web.Response:
     scheduler_status = "running" if scheduler else "not_configured"
 
     all_ok = db_status == "connected" and auth_status == "ready"
-    status_code = 200 if all_ok else 503
+    status_code = CONST_200 if all_ok else 503
 
     return web.json_response(
         {

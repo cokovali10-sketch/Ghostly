@@ -3,12 +3,18 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Awaitable
 
 from ghostly.core.database import Database
+# --- константы вынесены FORGE refactor ---
+CONST_7 = 7
+CONST_30 = 30
+CONST_60 = 60
+CONST_90 = 90
+CONST_1000 = 1000
+
 
 logger = logging.getLogger("ghostly.scheduler")
 
@@ -32,7 +38,7 @@ def cron_matches(cron: dict[str, Any], dt: datetime) -> bool:
         (cron["hour"], dt.hour, 0, 23),
         (cron["day"], dt.day, 1, 31),
         (cron["month"], dt.month, 1, 12),
-        (cron["weekday"], dt.isoweekday() % 7, 0, 6),
+        (cron["weekday"], dt.isoweekday() % CONST_7, 0, 6),
     ]
     for field, value, min_val, max_val in checks:
         if field == "*":
@@ -61,7 +67,7 @@ def cron_matches(cron: dict[str, Any], dt: datetime) -> bool:
 def next_cron_time(cron: dict[str, Any], after: datetime) -> datetime:
     candidate = after + timedelta(minutes=1)
     candidate = candidate.replace(second=0, microsecond=0)
-    for _ in range(366 * 24 * 60):
+    for _ in range(366 * 24 * CONST_60):
         if cron_matches(cron, candidate):
             return candidate
         candidate += timedelta(minutes=1)
@@ -75,7 +81,7 @@ class TaskScheduler:
         self._running = False
         self._task_handle: asyncio.Task[None] | None = None
         self._callbacks: dict[str, Callable[[], Awaitable[None]]] = {}
-        self._tick_interval = 30
+        self._tick_interval = CONST_30
 
     async def start(self) -> None:
         if self._running:
@@ -143,13 +149,13 @@ class TaskScheduler:
         start = time.monotonic()
         try:
             await callback()
-            elapsed = (time.monotonic() - start) * 1000
+            elapsed = (time.monotonic() - start) * CONST_1000
             task["last_run"] = datetime.now(timezone.utc).isoformat()
             task["run_count"] += 1
             task["last_error"] = None
             logger.info("Task '%s' completed in %.1fms", name, elapsed)
         except Exception as exc:
-            elapsed = (time.monotonic() - start) * 1000
+            elapsed = (time.monotonic() - start) * CONST_1000
             task["error_count"] += 1
             task["last_error"] = str(exc)
             logger.error("Task '%s' failed after %.1fms: %s", name, elapsed, exc)
@@ -297,7 +303,7 @@ class ReportGenerator:
     def __init__(self, db: Database) -> None:
         self.db = db
 
-    async def generate_site_report(self, site_id: int, days: int = 7) -> dict[str, Any]:
+    async def generate_site_report(self, site_id: int, days: int = CONST_7) -> dict[str, Any]:
         from ghostly.core.aggregator import Aggregator
         aggregator = Aggregator(self.db)
         dashboard = await aggregator.get_dashboard(site_id, days)
@@ -318,7 +324,7 @@ class ReportGenerator:
             "top_referrers": referrers,
         }
 
-    async def generate_org_report(self, org_id: int, days: int = 7) -> dict[str, Any]:
+    async def generate_org_report(self, org_id: int, days: int = CONST_7) -> dict[str, Any]:
         site_rows = await self.db._fetch_all(
             "SELECT site_id FROM org_sites WHERE org_id=?", (org_id,)
         )
@@ -414,7 +420,7 @@ class DataCleanup:
     def __init__(self, db: Database) -> None:
         self.db = db
 
-    async def cleanup_old_pageviews(self, retention_days: int = 90) -> int:
+    async def cleanup_old_pageviews(self, retention_days: int = CONST_90) -> int:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
         result = await self.db.db.execute(
             "DELETE FROM pageviews WHERE created_at < ?", (cutoff,)
@@ -425,7 +431,7 @@ class DataCleanup:
             logger.info("Cleaned up %d old pageviews (retention: %d days)", deleted, retention_days)
         return deleted
 
-    async def cleanup_old_events(self, retention_days: int = 90) -> int:
+    async def cleanup_old_events(self, retention_days: int = CONST_90) -> int:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
         result = await self.db.db.execute(
             "DELETE FROM events WHERE created_at < ?", (cutoff,)
@@ -436,7 +442,7 @@ class DataCleanup:
             logger.info("Cleaned up %d old events", deleted)
         return deleted
 
-    async def cleanup_old_sessions(self, retention_days: int = 90) -> int:
+    async def cleanup_old_sessions(self, retention_days: int = CONST_90) -> int:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
         result = await self.db.db.execute(
             "DELETE FROM analytics_sessions WHERE started_at < ?", (cutoff,)
@@ -447,7 +453,7 @@ class DataCleanup:
             logger.info("Cleaned up %d old sessions", deleted)
         return deleted
 
-    async def cleanup_old_heatmap_clicks(self, retention_days: int = 60) -> int:
+    async def cleanup_old_heatmap_clicks(self, retention_days: int = CONST_60) -> int:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
         result = await self.db.db.execute(
             "DELETE FROM heatmap_clicks WHERE created_at < ?", (cutoff,)
@@ -458,7 +464,7 @@ class DataCleanup:
             logger.info("Cleaned up %d old heatmap clicks", deleted)
         return deleted
 
-    async def cleanup_old_realtime_snapshots(self, retention_days: int = 7) -> int:
+    async def cleanup_old_realtime_snapshots(self, retention_days: int = CONST_7) -> int:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
         result = await self.db.db.execute(
             "DELETE FROM realtime_snapshots WHERE created_at < ?", (cutoff,)
@@ -469,7 +475,7 @@ class DataCleanup:
             logger.info("Cleaned up %d old realtime snapshots", deleted)
         return deleted
 
-    async def cleanup_old_search_history(self, retention_days: int = 30) -> int:
+    async def cleanup_old_search_history(self, retention_days: int = CONST_30) -> int:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
         result = await self.db.db.execute(
             "DELETE FROM search_history WHERE created_at < ?", (cutoff,)
@@ -488,14 +494,14 @@ class DataCleanup:
         await self.db.db.commit()
         return result.rowcount
 
-    async def run_full_cleanup(self, retention_days: int = 90) -> dict[str, Any]:
+    async def run_full_cleanup(self, retention_days: int = CONST_90) -> dict[str, Any]:
         results = {}
         results["pageviews"] = await self.cleanup_old_pageviews(retention_days)
         results["events"] = await self.cleanup_old_events(retention_days)
         results["sessions"] = await self.cleanup_old_sessions(retention_days)
-        results["heatmap_clicks"] = await self.cleanup_old_heatmap_clicks(60)
-        results["realtime_snapshots"] = await self.cleanup_old_realtime_snapshots(7)
-        results["search_history"] = await self.cleanup_old_search_history(30)
+        results["heatmap_clicks"] = await self.cleanup_old_heatmap_clicks(CONST_60)
+        results["realtime_snapshots"] = await self.cleanup_old_realtime_snapshots(CONST_7)
+        results["search_history"] = await self.cleanup_old_search_history(CONST_30)
         results["expired_sessions"] = await self.cleanup_expired_sessions()
         total = sum(results.values())
         logger.info("Full cleanup completed: %d total records removed", total)
@@ -534,7 +540,7 @@ class EmailReportSender:
 
             site_id = schedule.get("site_id")
             recipients = json.loads(schedule.get("recipients", "[]")) if isinstance(schedule.get("recipients"), str) else schedule.get("recipients", [])
-            days = schedule.get("days", 7)
+            days = schedule.get("days", CONST_7)
 
             if not recipients or not site_id:
                 continue

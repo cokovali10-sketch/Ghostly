@@ -1,5 +1,8 @@
 """Build Ghostly EXE with PyInstaller."""
-import subprocess, sys, os, shutil
+import subprocess, sys, os
+# --- константы вынесены FORGE refactor ---
+CONST_1024 = 1024
+
 
 def build():
     print("Building Ghostly EXE...")
@@ -16,7 +19,7 @@ def build():
     subprocess.run(cmd, check=True)
     os.makedirs("dist", exist_ok=True)
     if os.path.exists("dist/Ghostly.exe"):
-        size = os.path.getsize("dist/Ghostly.exe") // (1024*1024)
+        size = os.path.getsize("dist/Ghostly.exe") // (CONST_1024*CONST_1024)
         print(f"OK: dist/Ghostly.exe ({size} MB)")
     else:
         print("FAILED")

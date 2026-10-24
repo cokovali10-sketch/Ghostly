@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import smtplib
@@ -11,6 +10,13 @@ from email.mime.text import MIMEText
 from typing import Any
 
 from .database import Database
+# --- константы вынесены FORGE refactor ---
+CONST_7 = 7
+CONST_15 = 15
+CONST_24 = 24
+CONST_30 = 30
+CONST_60 = 60
+
 
 logger = logging.getLogger("ghostly.email")
 
@@ -56,10 +62,10 @@ class EmailReporter:
 
         if use_tls:
             context = ssl.create_default_context()
-            server = smtplib.SMTP(host, port, timeout=15)
+            server = smtplib.SMTP(host, port, timeout=CONST_15)
             server.starttls(context=context)
         else:
-            server = smtplib.SMTP(host, port, timeout=15)
+            server = smtplib.SMTP(host, port, timeout=CONST_15)
 
         if user and password:
             server.login(user, password)
@@ -178,7 +184,7 @@ class EmailReporter:
     async def generate_report(
         self,
         site_id: int,
-        days: int = 7,
+        days: int = CONST_7,
     ) -> dict[str, Any]:
         site = await self.db._fetch_one("SELECT id, domain, name FROM sites WHERE id=?", (site_id,))
         if not site:
@@ -189,7 +195,7 @@ class EmailReporter:
         pages = await self.db.get_page_stats(site_id, days=days, limit=10)
         daily = await self.db.get_daily_stats(site_id, days=days)
 
-        labels = {1: "Daily Report", 7: "Weekly Report", 30: "Monthly Report"}
+        labels = {1: "Daily Report", CONST_7: "Weekly Report", CONST_30: "Monthly Report"}
         period_label = labels.get(days, f"{days}-Day Report")
 
         html = self._build_html_report(site, stats, visitor_stats, pages, daily, period_label)
@@ -206,7 +212,7 @@ class EmailReporter:
         self,
         site_id: int,
         recipients: list[str],
-        days: int = 7,
+        days: int = CONST_7,
         subject: str | None = None,
     ) -> dict[str, Any]:
         if not recipients:
@@ -247,7 +253,7 @@ class EmailReporter:
         site_id: int,
         recipients: list[str],
         cron_expr: str,
-        days: int = 7,
+        days: int = CONST_7,
     ) -> dict[str, Any]:
         if not self._validate_cron(cron_expr):
             raise ValueError(f"Invalid cron expression: {cron_expr}")
@@ -286,7 +292,7 @@ class EmailReporter:
             (0, 23),
             (1, 31),
             (1, 12),
-            (0, 7),
+            (0, CONST_7),
         ]
         for part, (lo, hi) in zip(parts, ranges_spec):
             if part == "*":
@@ -334,11 +340,11 @@ class EmailReporter:
             last_dt = datetime.fromisoformat(last_sent)
         except (ValueError, TypeError):
             return True
-        minutes_since = (now - last_dt).total_seconds() / 60
-        days = schedule.get("days", 7)
+        minutes_since = (now - last_dt).total_seconds() / CONST_60
+        days = schedule.get("days", CONST_7)
         if days <= 1:
-            return minutes_since >= 24 * 60
-        elif days <= 7:
-            return minutes_since >= 7 * 24 * 60
+            return minutes_since >= CONST_24 * CONST_60
+        elif days <= CONST_7:
+            return minutes_since >= CONST_7 * CONST_24 * CONST_60
         else:
-            return minutes_since >= 30 * 24 * 60
+            return minutes_since >= CONST_30 * CONST_24 * CONST_60

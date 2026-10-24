@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
-import json
 import logging
 import sys
 from pathlib import Path
 from typing import Any, Callable
 
 from .database import Database
+# --- константы вынесены FORGE refactor ---
+CONST_30 = 30
+
 
 logger = logging.getLogger("ghostly.plugins")
 
@@ -21,10 +23,10 @@ class PluginAPI:
     def __init__(self, db: Database) -> None:
         self.db = db
 
-    async def get_site_stats(self, site_id: int, days: int = 30) -> dict[str, Any]:
+    async def get_site_stats(self, site_id: int, days: int = CONST_30) -> dict[str, Any]:
         return await self.db.get_site_stats(site_id, days=days)
 
-    async def get_page_stats(self, site_id: int, days: int = 30) -> list[dict[str, Any]]:
+    async def get_page_stats(self, site_id: int, days: int = CONST_30) -> list[dict[str, Any]]:
         return await self.db.get_page_stats(site_id, days=days)
 
     async def query(self, sql: str, params: tuple = ()) -> list[dict[str, Any]]:

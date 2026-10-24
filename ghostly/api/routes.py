@@ -4,12 +4,10 @@ import functools
 import hashlib
 import json
 import logging
-import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlparse
 
-import aiosqlite
 from aiohttp import web
 
 from ghostly.core.ab_test import ABTestManager
@@ -21,6 +19,20 @@ from ghostly.core.funnels import FunnelManager
 from ghostly.core.geomap import GeoMapCollector
 from ghostly.core.goals import GoalManager
 from ghostly.core.retention import RetentionAnalyzer
+# --- константы вынесены FORGE refactor ---
+CONST_5 = 5
+CONST_7 = 7
+CONST_20 = 20
+CONST_30 = 30
+CONST_50 = 50
+CONST_201 = 201
+CONST_365 = 365
+CONST_400 = 400
+CONST_403 = 403
+CONST_404 = 404
+CONST_503 = 503
+CONST_1000 = 1000
+
 
 logger = logging.getLogger("ghostly.api")
 
@@ -31,7 +43,7 @@ def _json_response(data: Any, status: int = 200) -> web.Response:
     return web.json_response(data, status=status, dumps=json.dumps)
 
 
-def _error(message: str, status: int = 400) -> web.Response:
+def _error(message: str, status: int = CONST_400) -> web.Response:
     return _json_response({"error": message}, status=status)
 
 
@@ -56,18 +68,18 @@ def _get_user(request: web.Request) -> dict[str, Any]:
     return user
 
 
-def _parse_days(request: web.Request, default: int = 30) -> int:
+def _parse_days(request: web.Request, default: int = CONST_30) -> int:
     raw = request.query.get("days")
     if raw is None:
         return default
     try:
         days = int(raw)
-        return max(1, min(days, 365))
+        return max(1, min(days, CONST_365))
     except ValueError:
         return default
 
 
-def _parse_limit(request: web.Request, default: int = 50) -> int:
+def _parse_limit(request: web.Request, default: int = CONST_50) -> int:
     raw = request.query.get("limit")
     if raw is None:
         return default
@@ -122,7 +134,7 @@ def require_role(role: str):
                 return _error(exc.message, exc.status)
 
             if not auth.require_role(user["role"], role):
-                return _error("Insufficient permissions", 403)
+                return _error("Insufficient permissions", CONST_403)
 
             return await handler(request)
         return wrapper
@@ -144,7 +156,7 @@ async def global_health(request: web.Request) -> web.Response:
         })
     except Exception as exc:
         logger.error("Health check failed: %s", exc)
-        return _json_response({"status": "error", "message": str(exc)}, status=503)
+        return _json_response({"status": "error", "message": str(exc)}, status=CONST_503)
 
 
 # ── Auth Endpoints ───────────────────────────────────────────────────────
@@ -171,7 +183,7 @@ async def auth_register(request: web.Request) -> web.Response:
     except AuthError as exc:
         return _error(exc.message, exc.status)
 
-    return _json_response(result, status=201)
+    return _json_response(result, status=CONST_201)
 
 
 @routes.post("/api/auth/login")
@@ -246,7 +258,7 @@ async def auth_me(request: web.Request) -> web.Response:
 
     user_data = await auth.get_user(user["user_id"])
     if not user_data:
-        return _error("User not found", 404)
+        return _error("User not found", CONST_404)
 
     return _json_response({"user": user_data})
 
@@ -348,7 +360,7 @@ async def create_user_api_key(request: web.Request) -> web.Response:
 
     name = (body.get("name") or "unnamed").strip()
     permissions = body.get("permissions", ["read"])
-    rate_limit = body.get("rate_limit", 1000)
+    rate_limit = body.get("rate_limit", CONST_1000)
     expires_in_days = body.get("expires_in_days")
 
     try:
@@ -363,7 +375,7 @@ async def create_user_api_key(request: web.Request) -> web.Response:
     except AuthError as exc:
         return _error(exc.message, exc.status)
 
-    return _json_response(key_data, status=201)
+    return _json_response(key_data, status=CONST_201)
 
 
 @routes.delete("/api/auth/api-keys/{id}")
@@ -376,7 +388,7 @@ async def delete_user_api_key(request: web.Request) -> web.Response:
 
     deleted = await auth.revoke_api_key(key_id, user["user_id"], ip)
     if not deleted:
-        return _error("API key not found", status=404)
+        return _error("API key not found", status=CONST_404)
     return _json_response({"ok": True})
 
 
@@ -400,7 +412,7 @@ async def admin_delete_user(request: web.Request) -> web.Response:
     ip = _get_client_ip(request)
 
     if admin_user["user_id"] == target_user_id:
-        return _error("Cannot delete your own account", 400)
+        return _error("Cannot delete your own account", CONST_400)
 
     try:
         await auth.delete_user_account(admin_user["user_id"], target_user_id, ip)
@@ -460,7 +472,7 @@ async def admin_deactivate_user(request: web.Request) -> web.Response:
     ip = _get_client_ip(request)
 
     if admin_user["user_id"] == target_user_id:
-        return _error("Cannot deactivate your own account", 400)
+        return _error("Cannot deactivate your own account", CONST_400)
 
     try:
         await auth.deactivate_user(admin_user["user_id"], target_user_id, ip)
@@ -512,7 +524,7 @@ async def health(request: web.Request) -> web.Response:
         return _json_response({"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()})
     except Exception as exc:
         logger.error("Health check failed: %s", exc)
-        return _json_response({"status": "error", "message": str(exc)}, status=503)
+        return _json_response({"status": "error", "message": str(exc)}, status=CONST_503)
 
 
 # ── Tracking ────────────────────────────────────────────────────────────
@@ -533,7 +545,7 @@ async def track(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE domain=? AND is_active=1", (domain,))
     if not site:
-        return _error("Unknown site", status=404)
+        return _error("Unknown site", status=CONST_404)
 
     site_id = site["id"]
     event_type = body.get("type", "pageview")
@@ -574,7 +586,7 @@ async def track(request: web.Request) -> web.Response:
             url=url,
             meta=meta if isinstance(meta, dict) else {},
         )
-        return _json_response({"ok": True, "id": event_id}, status=201)
+        return _json_response({"ok": True, "id": event_id}, status=CONST_201)
 
     pv_id = await db.insert_pageview(
         site_id=site_id,
@@ -658,7 +670,7 @@ async def track(request: web.Request) -> web.Response:
     except Exception as exc:
         logger.warning("Failed to update session/visitor: %s", exc)
 
-    return _json_response({"ok": True, "id": pv_id}, status=201)
+    return _json_response({"ok": True, "id": pv_id}, status=CONST_201)
 
 
 # ── Sites CRUD ──────────────────────────────────────────────────────────
@@ -710,7 +722,7 @@ async def create_site(request: web.Request) -> web.Response:
 
     return _json_response(
         {"id": site_id, "domain": clean_domain, "name": name or clean_domain},
-        status=201,
+        status=CONST_201,
     )
 
 
@@ -721,7 +733,7 @@ async def delete_site(request: web.Request) -> web.Response:
     db = _get_db(request)
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
     await db.db.execute("DELETE FROM sites WHERE id=?", (site_id,))
     await db.db.commit()
 
@@ -744,7 +756,7 @@ async def site_stats(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id, domain, name FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     stats = await db.get_site_stats(site_id, days=days)
     visitor_stats = await db.get_visitor_stats(site_id, days=days)
@@ -767,7 +779,7 @@ async def site_pages(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     pages = await db.get_page_stats(site_id, days=days, limit=limit)
     return _json_response({"pages": pages, "period_days": days})
@@ -779,11 +791,11 @@ async def site_referrers(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
     days = _parse_days(request)
-    limit = _parse_limit(request, default=30)
+    limit = _parse_limit(request, default=CONST_30)
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     referrers = await db.get_referrer_stats(site_id, days=days, limit=limit)
     return _json_response({"referrers": referrers, "period_days": days})
@@ -798,7 +810,7 @@ async def site_devices(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     devices = await db.get_device_stats(site_id, days=days)
     return _json_response({"devices": devices, "period_days": days})
@@ -813,7 +825,7 @@ async def site_browsers(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     browsers = await db.get_browser_stats(site_id, days=days)
     return _json_response({"browsers": browsers, "period_days": days})
@@ -825,11 +837,11 @@ async def site_countries(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
     days = _parse_days(request)
-    limit = _parse_limit(request, default=50)
+    limit = _parse_limit(request, default=CONST_50)
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     countries = await db.get_country_stats(site_id, days=days, limit=limit)
     return _json_response({"countries": countries, "period_days": days})
@@ -844,7 +856,7 @@ async def site_daily(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     daily = await db.get_daily_stats(site_id, days=days)
     return _json_response({"daily": daily, "period_days": days})
@@ -855,11 +867,11 @@ async def site_daily(request: web.Request) -> web.Response:
 async def site_hourly(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
-    days = _parse_days(request, default=7)
+    days = _parse_days(request, default=CONST_7)
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     hourly = await db.get_hourly_stats(site_id, days=days)
     return _json_response({"hourly": hourly, "period_days": days})
@@ -873,10 +885,10 @@ async def site_realtime(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     now = datetime.now(timezone.utc)
-    five_min_ago = (now - timedelta(minutes=5)).isoformat()
+    five_min_ago = (now - timedelta(minutes=CONST_5)).isoformat()
 
     active = await db._fetch_one(
         """SELECT COUNT(DISTINCT visitor_id) AS active_visitors
@@ -912,7 +924,7 @@ async def site_retention(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     retention = await db.get_retention(site_id, days=days)
     return _json_response({"retention": retention, "period_days": days})
@@ -929,7 +941,7 @@ async def list_api_keys(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     auth = AuthManager(db)
     keys = await auth.get_api_keys(site_id)
@@ -944,7 +956,7 @@ async def create_api_key(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     try:
         body = await request.json()
@@ -953,7 +965,7 @@ async def create_api_key(request: web.Request) -> web.Response:
 
     name = (body.get("name") or "unnamed").strip()
     permissions = body.get("permissions", ["read"])
-    rate_limit = body.get("rate_limit", 1000)
+    rate_limit = body.get("rate_limit", CONST_1000)
     expires_in_days = body.get("expires_in_days")
 
     auth = AuthManager(db)
@@ -964,7 +976,7 @@ async def create_api_key(request: web.Request) -> web.Response:
         rate_limit=rate_limit,
         expires_in_days=expires_in_days,
     )
-    return _json_response(key_data, status=201)
+    return _json_response(key_data, status=CONST_201)
 
 
 @routes.delete("/api/api-keys/{id}")
@@ -976,7 +988,7 @@ async def delete_api_key(request: web.Request) -> web.Response:
     auth = AuthManager(db)
     deleted = await auth.revoke_api_key(key_id)
     if not deleted:
-        return _error("API key not found", status=404)
+        return _error("API key not found", status=CONST_404)
     return _json_response({"ok": True})
 
 
@@ -989,7 +1001,7 @@ async def get_api_key(request: web.Request) -> web.Response:
     auth = AuthManager(db)
     key = await auth.get_api_key(key_id)
     if not key:
-        return _error("API key not found", status=404)
+        return _error("API key not found", status=CONST_404)
     return _json_response(key)
 
 
@@ -1004,7 +1016,7 @@ async def list_alerts(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     alert_mgr = AlertManager(db)
     alerts = await alert_mgr.get_alerts(site_id)
@@ -1019,7 +1031,7 @@ async def create_alert(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     try:
         body = await request.json()
@@ -1029,8 +1041,8 @@ async def create_alert(request: web.Request) -> web.Response:
     name = (body.get("name") or "").strip()
     alert_type = (body.get("alert_type") or "").strip()
     threshold = body.get("threshold", 0)
-    window_minutes = body.get("window_minutes", 5)
-    cooldown_minutes = body.get("cooldown_minutes", 30)
+    window_minutes = body.get("window_minutes", CONST_5)
+    cooldown_minutes = body.get("cooldown_minutes", CONST_30)
     metadata = body.get("metadata", {})
 
     if not name:
@@ -1052,7 +1064,7 @@ async def create_alert(request: web.Request) -> web.Response:
     except ValueError as exc:
         return _error(str(exc))
 
-    return _json_response(alert, status=201)
+    return _json_response(alert, status=CONST_201)
 
 
 @routes.get("/api/alerts/{id}")
@@ -1064,7 +1076,7 @@ async def get_alert(request: web.Request) -> web.Response:
     alert_mgr = AlertManager(db)
     alert = await alert_mgr.get_alert(alert_id)
     if not alert:
-        return _error("Alert not found", status=404)
+        return _error("Alert not found", status=CONST_404)
     return _json_response(alert)
 
 
@@ -1082,7 +1094,7 @@ async def update_alert(request: web.Request) -> web.Response:
     alert_mgr = AlertManager(db)
     alert = await alert_mgr.get_alert(alert_id)
     if not alert:
-        return _error("Alert not found", status=404)
+        return _error("Alert not found", status=CONST_404)
 
     updates = {}
     for key in ("name", "threshold", "window_minutes", "cooldown_minutes", "status", "metadata"):
@@ -1109,7 +1121,7 @@ async def delete_alert(request: web.Request) -> web.Response:
     alert_mgr = AlertManager(db)
     deleted = await alert_mgr.delete_alert(alert_id)
     if not deleted:
-        return _error("Alert not found", status=404)
+        return _error("Alert not found", status=CONST_404)
     return _json_response({"ok": True})
 
 
@@ -1118,11 +1130,11 @@ async def delete_alert(request: web.Request) -> web.Response:
 async def alert_history(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
-    limit = _parse_limit(request, default=50)
+    limit = _parse_limit(request, default=CONST_50)
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     alert_mgr = AlertManager(db)
     history = await alert_mgr.get_alert_history(site_id, limit=limit)
@@ -1140,7 +1152,7 @@ async def list_funnels(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     funnel_mgr = FunnelManager(db)
     funnels = await funnel_mgr.get_funnels(site_id)
@@ -1155,7 +1167,7 @@ async def create_funnel(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     try:
         body = await request.json()
@@ -1178,7 +1190,7 @@ async def create_funnel(request: web.Request) -> web.Response:
         steps=steps,
         description=description,
     )
-    return _json_response(funnel, status=201)
+    return _json_response(funnel, status=CONST_201)
 
 
 @routes.get("/api/funnels/{id}")
@@ -1190,7 +1202,7 @@ async def get_funnel(request: web.Request) -> web.Response:
     funnel_mgr = FunnelManager(db)
     funnel = await funnel_mgr.get_funnel(funnel_id)
     if not funnel:
-        return _error("Funnel not found", status=404)
+        return _error("Funnel not found", status=CONST_404)
     return _json_response(funnel)
 
 
@@ -1205,7 +1217,7 @@ async def funnel_stats(request: web.Request) -> web.Response:
     try:
         stats = await funnel_mgr.get_funnel_stats(funnel_id, days=days)
     except ValueError as exc:
-        return _error(str(exc), status=404)
+        return _error(str(exc), status=CONST_404)
     return _json_response(stats)
 
 
@@ -1218,7 +1230,7 @@ async def delete_funnel(request: web.Request) -> web.Response:
     funnel_mgr = FunnelManager(db)
     deleted = await funnel_mgr.delete_funnel(funnel_id)
     if not deleted:
-        return _error("Funnel not found", status=404)
+        return _error("Funnel not found", status=CONST_404)
     return _json_response({"ok": True})
 
 
@@ -1233,7 +1245,7 @@ async def list_goals(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     goal_mgr = GoalManager(db)
     goals = await goal_mgr.get_goals(site_id)
@@ -1248,7 +1260,7 @@ async def create_goal(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     try:
         body = await request.json()
@@ -1275,7 +1287,7 @@ async def create_goal(request: web.Request) -> web.Response:
     except ValueError as exc:
         return _error(str(exc))
 
-    return _json_response(goal, status=201)
+    return _json_response(goal, status=CONST_201)
 
 
 @routes.get("/api/goals/{id}")
@@ -1287,7 +1299,7 @@ async def get_goal(request: web.Request) -> web.Response:
     goal_mgr = GoalManager(db)
     goal = await goal_mgr.get_goal(goal_id)
     if not goal:
-        return _error("Goal not found", status=404)
+        return _error("Goal not found", status=CONST_404)
     return _json_response(goal)
 
 
@@ -1302,7 +1314,7 @@ async def goal_stats(request: web.Request) -> web.Response:
     try:
         stats = await goal_mgr.get_goal_stats(goal_id, days=days)
     except ValueError as exc:
-        return _error(str(exc), status=404)
+        return _error(str(exc), status=CONST_404)
     return _json_response(stats)
 
 
@@ -1315,7 +1327,7 @@ async def delete_goal(request: web.Request) -> web.Response:
     goal_mgr = GoalManager(db)
     deleted = await goal_mgr.delete_goal(goal_id)
     if not deleted:
-        return _error("Goal not found", status=404)
+        return _error("Goal not found", status=CONST_404)
     return _json_response({"ok": True})
 
 
@@ -1334,7 +1346,7 @@ async def export_data(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     if format not in ("json", "csv", "html"):
         return _error("Invalid format. Must be json, csv, or html")
@@ -1351,7 +1363,7 @@ async def export_data(request: web.Request) -> web.Response:
             data_types=data_types,
         )
     except ValueError as exc:
-        return _error(str(exc), status=404)
+        return _error(str(exc), status=CONST_404)
 
     await export_mgr.log_export(site_id, format, data_types)
 
@@ -1372,7 +1384,7 @@ async def export_history(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     export_mgr = ExportManager(db)
     history = await export_mgr.get_export_history(site_id)
@@ -1391,7 +1403,7 @@ async def site_dashboard(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id, domain, name FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     from ghostly.core.aggregator import Aggregator
     aggregator = Aggregator(db)
@@ -1430,7 +1442,7 @@ async def list_webhooks(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     webhooks = await db.get_webhooks(site_id)
     return _json_response({"webhooks": webhooks})
@@ -1444,7 +1456,7 @@ async def create_webhook(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     try:
         body = await request.json()
@@ -1467,7 +1479,7 @@ async def create_webhook(request: web.Request) -> web.Response:
         secret=secret,
     )
 
-    return _json_response({"id": webhook_id, "ok": True}, status=201)
+    return _json_response({"id": webhook_id, "ok": True}, status=CONST_201)
 
 
 @routes.delete("/api/webhooks/{id}")
@@ -1478,7 +1490,7 @@ async def delete_webhook(request: web.Request) -> web.Response:
 
     deleted = await db.delete_webhook(webhook_id)
     if not deleted:
-        return _error("Webhook not found", status=404)
+        return _error("Webhook not found", status=CONST_404)
     return _json_response({"ok": True})
 
 
@@ -1534,7 +1546,7 @@ async def send_test_email(request: web.Request) -> web.Response:
 
     reporter = EmailReporter(db)
     await reporter.load_config()
-    result = await reporter.send_report(int(site_id), recipients, days=7)
+    result = await reporter.send_report(int(site_id), recipients, days=CONST_7)
     return _json_response(result)
 
 
@@ -1547,7 +1559,7 @@ async def list_email_schedules(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     reporter = EmailReporter(db)
     schedules = await reporter.get_schedules()
@@ -1564,7 +1576,7 @@ async def create_email_schedule(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     try:
         body = await request.json()
@@ -1573,7 +1585,7 @@ async def create_email_schedule(request: web.Request) -> web.Response:
 
     recipients = body.get("recipients", [])
     cron_expr = body.get("cron_expr", "0 8 * * 1")
-    days = body.get("days", 7)
+    days = body.get("days", CONST_7)
 
     if not recipients:
         return _error("Missing 'recipients' list")
@@ -1584,7 +1596,7 @@ async def create_email_schedule(request: web.Request) -> web.Response:
     except ValueError as exc:
         return _error(str(exc))
 
-    return _json_response(schedule, status=201)
+    return _json_response(schedule, status=CONST_201)
 
 
 @routes.delete("/api/email/schedules/{id}")
@@ -1596,7 +1608,7 @@ async def delete_email_schedule(request: web.Request) -> web.Response:
     reporter = EmailReporter(db)
     deleted = await reporter.delete_schedule(schedule_id)
     if not deleted:
-        return _error("Schedule not found", status=404)
+        return _error("Schedule not found", status=CONST_404)
     return _json_response({"ok": True})
 
 
@@ -1609,7 +1621,7 @@ async def send_report_now(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     try:
         body = await request.json()
@@ -1617,7 +1629,7 @@ async def send_report_now(request: web.Request) -> web.Response:
         return _error("Invalid JSON body")
 
     recipients = body.get("recipients", [])
-    days = body.get("days", 7)
+    days = body.get("days", CONST_7)
 
     if not recipients:
         return _error("Missing 'recipients' list")
@@ -1640,7 +1652,7 @@ async def webhook_history(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     mgr = WebhookManager(db)
     history = await mgr.get_delivery_history(site_id)
@@ -1658,7 +1670,7 @@ async def test_webhook(request: web.Request) -> web.Response:
     try:
         result = await mgr.test_webhook(webhook_id)
     except ValueError as exc:
-        return _error(str(exc), status=404)
+        return _error(str(exc), status=CONST_404)
 
     return _json_response(result)
 
@@ -1674,7 +1686,7 @@ async def record_heatmap_click(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     try:
         body = await request.json()
@@ -1699,7 +1711,7 @@ async def record_heatmap_click(request: web.Request) -> web.Response:
         element_id=body.get("element_id", ""),
         element_classes=body.get("element_classes", ""),
     )
-    return _json_response({"ok": True, "id": click_id}, status=201)
+    return _json_response({"ok": True, "id": click_id}, status=CONST_201)
 
 
 @routes.get("/api/sites/{id}/heatmap/grid")
@@ -1711,7 +1723,7 @@ async def heatmap_grid(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     page_url = request.query.get("page_url")
     days = _parse_days(request)
@@ -1730,7 +1742,7 @@ async def heatmap_sections(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     page_url = request.query.get("page_url")
     days = _parse_days(request)
@@ -1749,7 +1761,7 @@ async def heatmap_elements(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     page_url = request.query.get("page_url")
     days = _parse_days(request)
@@ -1768,7 +1780,7 @@ async def heatmap_pages(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     days = _parse_days(request)
 
@@ -1786,7 +1798,7 @@ async def heatmap_clicks(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     page_url = request.query.get("page_url")
     days = _parse_days(request)
@@ -1818,7 +1830,7 @@ async def get_theme(request: web.Request) -> web.Response:
     mgr = ThemeManager(db)
     theme = await mgr.get_theme(theme_id)
     if not theme:
-        return _error("Theme not found", status=404)
+        return _error("Theme not found", status=CONST_404)
     return _json_response({"theme": theme})
 
 
@@ -1844,7 +1856,7 @@ async def create_theme(request: web.Request) -> web.Response:
     except ValueError as exc:
         return _error(str(exc))
 
-    return _json_response({"id": theme_id, "theme": theme}, status=201)
+    return _json_response({"id": theme_id, "theme": theme}, status=CONST_201)
 
 
 @routes.delete("/api/themes/{id}")
@@ -1859,7 +1871,7 @@ async def delete_theme(request: web.Request) -> web.Response:
     except ValueError as exc:
         return _error(str(exc))
     if not deleted:
-        return _error("Theme not found", status=404)
+        return _error("Theme not found", status=CONST_404)
     return _json_response({"ok": True})
 
 
@@ -1943,7 +1955,7 @@ async def get_plugin(request: web.Request) -> web.Response:
     mgr = PluginManager(db)
     plugin = mgr.get_plugin(name)
     if not plugin:
-        return _error("Plugin not found", status=404)
+        return _error("Plugin not found", status=CONST_404)
     return _json_response({"plugin": plugin.to_dict()})
 
 
@@ -1975,7 +1987,7 @@ async def create_backup(request: web.Request) -> web.Response:
 
     mgr = BackupManager(db)
     result = await mgr.create_backup(name=name, compress=compress)
-    return _json_response(result, status=201)
+    return _json_response(result, status=CONST_201)
 
 
 @routes.post("/api/backups/restore")
@@ -1996,7 +2008,7 @@ async def restore_backup(request: web.Request) -> web.Response:
     try:
         result = await mgr.restore_backup(filename)
     except FileNotFoundError as exc:
-        return _error(str(exc), status=404)
+        return _error(str(exc), status=CONST_404)
 
     return _json_response(result)
 
@@ -2010,7 +2022,7 @@ async def delete_backup(request: web.Request) -> web.Response:
     mgr = BackupManager(db)
     deleted = await mgr.delete_backup(filename)
     if not deleted:
-        return _error("Backup not found", status=404)
+        return _error("Backup not found", status=CONST_404)
     return _json_response({"ok": True})
 
 
@@ -2041,7 +2053,7 @@ async def record_geo_location(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     try:
         body = await request.json()
@@ -2062,7 +2074,7 @@ async def record_geo_location(request: web.Request) -> web.Response:
         longitude=body.get("longitude"),
         ip_address=body.get("ip_address", ""),
     )
-    return _json_response({"ok": True, "id": location_id}, status=201)
+    return _json_response({"ok": True, "id": location_id}, status=CONST_201)
 
 
 @routes.get("/api/sites/{id}/geomap/countries")
@@ -2074,7 +2086,7 @@ async def geomap_countries(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     collector = GeoMapCollector(db)
     countries = await collector.get_country_stats(site_id, days=days)
@@ -2091,7 +2103,7 @@ async def geomap_cities(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     collector = GeoMapCollector(db)
     cities = await collector.get_city_stats(site_id, days=days, limit=limit)
@@ -2108,7 +2120,7 @@ async def geomap_top_countries(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     collector = GeoMapCollector(db)
     countries = await collector.get_top_countries(site_id, days=days, limit=limit)
@@ -2121,11 +2133,11 @@ async def geomap_top_cities(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
     days = _parse_days(request)
-    limit = _parse_limit(request, default=20)
+    limit = _parse_limit(request, default=CONST_20)
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     collector = GeoMapCollector(db)
     cities = await collector.get_top_cities(site_id, days=days, limit=limit)
@@ -2141,7 +2153,7 @@ async def geomap_geojson(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     collector = GeoMapCollector(db)
     geojson = await collector.generate_geojson(site_id, days=days)
@@ -2157,7 +2169,7 @@ async def geomap_country_geojson(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     collector = GeoMapCollector(db)
     geojson = await collector.generate_country_geojson(site_id, days=days)
@@ -2173,7 +2185,7 @@ async def geomap_distribution(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     collector = GeoMapCollector(db)
     distribution = await collector.get_visitor_country_distribution(site_id, days=days)
@@ -2189,7 +2201,7 @@ async def geomap_summary(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     collector = GeoMapCollector(db)
     summary = await collector.get_geo_summary(site_id, days=days)
@@ -2208,7 +2220,7 @@ async def retention_daily(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     analyzer = RetentionAnalyzer(db)
     retention = await analyzer.get_daily_retention(site_id, days=days)
@@ -2223,7 +2235,7 @@ async def retention_weekly(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     analyzer = RetentionAnalyzer(db)
     retention = await analyzer.get_weekly_retention(site_id)
@@ -2238,7 +2250,7 @@ async def retention_monthly(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     analyzer = RetentionAnalyzer(db)
     retention = await analyzer.get_monthly_retention(site_id)
@@ -2255,7 +2267,7 @@ async def retention_cohort(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     analyzer = RetentionAnalyzer(db)
     cohort = await analyzer.get_cohort_analysis(site_id, days=days, group_by=group_by)
@@ -2268,17 +2280,17 @@ async def retention_churn(request: web.Request) -> web.Response:
     site_id = int(request.match_info["id"])
     db = _get_db(request)
     days = _parse_days(request)
-    inactive_days = 30
+    inactive_days = CONST_30
     raw = request.query.get("inactive_days")
     if raw:
         try:
-            inactive_days = max(1, min(int(raw), 365))
+            inactive_days = max(1, min(int(raw), CONST_365))
         except ValueError:
             pass
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     analyzer = RetentionAnalyzer(db)
     churn = await analyzer.get_churn_rate(site_id, days=days, inactive_days=inactive_days)
@@ -2294,7 +2306,7 @@ async def retention_return_visitors(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     analyzer = RetentionAnalyzer(db)
     stats = await analyzer.get_return_visitor_stats(site_id, days=days)
@@ -2310,7 +2322,7 @@ async def retention_summary(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     analyzer = RetentionAnalyzer(db)
     summary = await analyzer.get_retention_summary(site_id, days=days)
@@ -2328,7 +2340,7 @@ async def list_experiments(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     mgr = ABTestManager(db)
     experiments = await mgr.get_experiments(site_id)
@@ -2343,7 +2355,7 @@ async def create_experiment(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     try:
         body = await request.json()
@@ -2372,7 +2384,7 @@ async def create_experiment(request: web.Request) -> web.Response:
     except ValueError as exc:
         return _error(str(exc))
 
-    return _json_response(experiment, status=201)
+    return _json_response(experiment, status=CONST_201)
 
 
 @routes.get("/api/experiments/{id}")
@@ -2384,7 +2396,7 @@ async def get_experiment(request: web.Request) -> web.Response:
     mgr = ABTestManager(db)
     experiment = await mgr.get_experiment(experiment_id)
     if not experiment:
-        return _error("Experiment not found", status=404)
+        return _error("Experiment not found", status=CONST_404)
     return _json_response(experiment)
 
 
@@ -2397,7 +2409,7 @@ async def start_experiment(request: web.Request) -> web.Response:
     mgr = ABTestManager(db)
     started = await mgr.start_experiment(experiment_id)
     if not started:
-        return _error("Experiment not found or already started", status=404)
+        return _error("Experiment not found or already started", status=CONST_404)
     return _json_response({"ok": True, "status": "running"})
 
 
@@ -2410,7 +2422,7 @@ async def stop_experiment(request: web.Request) -> web.Response:
     mgr = ABTestManager(db)
     stopped = await mgr.stop_experiment(experiment_id)
     if not stopped:
-        return _error("Experiment not found or not running", status=404)
+        return _error("Experiment not found or not running", status=CONST_404)
     return _json_response({"ok": True, "status": "completed"})
 
 
@@ -2423,7 +2435,7 @@ async def delete_experiment(request: web.Request) -> web.Response:
     mgr = ABTestManager(db)
     deleted = await mgr.delete_experiment(experiment_id)
     if not deleted:
-        return _error("Experiment not found", status=404)
+        return _error("Experiment not found", status=CONST_404)
     return _json_response({"ok": True})
 
 
@@ -2444,7 +2456,7 @@ async def assign_visitor_to_variant(request: web.Request) -> web.Response:
     mgr = ABTestManager(db)
     assignment = await mgr.assign_visitor(experiment_id, visitor_id)
     if not assignment:
-        return _error("Experiment not found or not running", status=404)
+        return _error("Experiment not found or not running", status=CONST_404)
     return _json_response(assignment)
 
 
@@ -2473,8 +2485,8 @@ async def track_ab_conversion(request: web.Request) -> web.Response:
         value=float(value),
     )
     if not conversion:
-        return _error("Visitor not assigned to this experiment", status=404)
-    return _json_response(conversion, status=201)
+        return _error("Visitor not assigned to this experiment", status=CONST_404)
+    return _json_response(conversion, status=CONST_201)
 
 
 @routes.get("/api/experiments/{id}/stats")
@@ -2487,7 +2499,7 @@ async def experiment_stats(request: web.Request) -> web.Response:
     mgr = ABTestManager(db)
     stats = await mgr.get_experiment_stats(experiment_id, days=days)
     if not stats:
-        return _error("Experiment not found", status=404)
+        return _error("Experiment not found", status=CONST_404)
     return _json_response(stats)
 
 
@@ -2512,7 +2524,7 @@ async def experiments_summary(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     mgr = ABTestManager(db)
     summary = await mgr.get_experiment_summary(site_id, days=days)
@@ -2565,7 +2577,7 @@ async def create_organization(request: web.Request) -> web.Response:
     except Exception as exc:
         return _error(str(exc))
 
-    return _json_response(org, status=201)
+    return _json_response(org, status=CONST_201)
 
 
 @routes.get("/api/organizations/{id}")
@@ -2577,11 +2589,11 @@ async def get_organization(request: web.Request) -> web.Response:
 
     role = await tenant.check_user_role(org_id, user["user_id"])
     if not role:
-        return _error("Access denied", 403)
+        return _error("Access denied", CONST_403)
 
     org = await tenant.get_organization(org_id)
     if not org:
-        return _error("Organization not found", 404)
+        return _error("Organization not found", CONST_404)
     return _json_response(org)
 
 
@@ -2594,7 +2606,7 @@ async def update_organization(request: web.Request) -> web.Response:
 
     role = await tenant.check_user_role(org_id, user["user_id"], ["owner", "admin"])
     if not role:
-        return _error("Insufficient permissions", 403)
+        return _error("Insufficient permissions", CONST_403)
 
     try:
         body = await request.json()
@@ -2624,7 +2636,7 @@ async def delete_organization(request: web.Request) -> web.Response:
 
     role = await tenant.check_user_role(org_id, user["user_id"], ["owner"])
     if not role:
-        return _error("Only the owner can delete the organization", 403)
+        return _error("Only the owner can delete the organization", CONST_403)
 
     await tenant.delete_organization(org_id)
     return _json_response({"ok": True})
@@ -2639,7 +2651,7 @@ async def list_org_members(request: web.Request) -> web.Response:
 
     role = await tenant.check_user_role(org_id, user["user_id"])
     if not role:
-        return _error("Access denied", 403)
+        return _error("Access denied", CONST_403)
 
     members = await tenant.get_members(org_id)
     return _json_response({"members": members})
@@ -2654,7 +2666,7 @@ async def add_org_member(request: web.Request) -> web.Response:
 
     role = await tenant.check_user_role(org_id, user["user_id"], ["owner", "admin"])
     if not role:
-        return _error("Insufficient permissions", 403)
+        return _error("Insufficient permissions", CONST_403)
 
     try:
         body = await request.json()
@@ -2677,7 +2689,7 @@ async def add_org_member(request: web.Request) -> web.Response:
     except Exception as exc:
         return _error(str(exc))
 
-    return _json_response(member, status=201)
+    return _json_response(member, status=CONST_201)
 
 
 @routes.put("/api/organizations/{org_id}/members/{user_id}/role")
@@ -2690,7 +2702,7 @@ async def update_org_member_role(request: web.Request) -> web.Response:
 
     role = await tenant.check_user_role(org_id, user["user_id"], ["owner", "admin"])
     if not role:
-        return _error("Insufficient permissions", 403)
+        return _error("Insufficient permissions", CONST_403)
 
     try:
         body = await request.json()
@@ -2719,7 +2731,7 @@ async def remove_org_member(request: web.Request) -> web.Response:
 
     role = await tenant.check_user_role(org_id, user["user_id"], ["owner", "admin"])
     if not role:
-        return _error("Insufficient permissions", 403)
+        return _error("Insufficient permissions", CONST_403)
 
     try:
         await tenant.remove_member(org_id, target_user_id)
@@ -2738,7 +2750,7 @@ async def org_usage(request: web.Request) -> web.Response:
 
     role = await tenant.check_user_role(org_id, user["user_id"])
     if not role:
-        return _error("Access denied", 403)
+        return _error("Access denied", CONST_403)
 
     usage = await tenant.get_org_usage(org_id)
     return _json_response(usage)
@@ -2753,7 +2765,7 @@ async def org_sites(request: web.Request) -> web.Response:
 
     role = await tenant.check_user_role(org_id, user["user_id"])
     if not role:
-        return _error("Access denied", 403)
+        return _error("Access denied", CONST_403)
 
     sites = await tenant.get_org_sites(org_id)
     return _json_response({"sites": sites})
@@ -2769,7 +2781,7 @@ async def add_site_to_org(request: web.Request) -> web.Response:
 
     role = await tenant.check_user_role(org_id, user["user_id"], ["owner", "admin"])
     if not role:
-        return _error("Insufficient permissions", 403)
+        return _error("Insufficient permissions", CONST_403)
 
     try:
         await tenant.add_site_to_org(org_id, site_id)
@@ -2789,7 +2801,7 @@ async def remove_site_from_org(request: web.Request) -> web.Response:
 
     role = await tenant.check_user_role(org_id, user["user_id"], ["owner", "admin"])
     if not role:
-        return _error("Insufficient permissions", 403)
+        return _error("Insufficient permissions", CONST_403)
 
     await tenant.remove_site_from_org(org_id, site_id)
     return _json_response({"ok": True})
@@ -2804,7 +2816,7 @@ async def upgrade_org_plan(request: web.Request) -> web.Response:
 
     role = await tenant.check_user_role(org_id, user["user_id"], ["owner"])
     if not role:
-        return _error("Only the owner can upgrade the plan", 403)
+        return _error("Only the owner can upgrade the plan", CONST_403)
 
     try:
         body = await request.json()
@@ -2846,7 +2858,7 @@ async def org_invoices(request: web.Request) -> web.Response:
 
     role = await tenant.check_user_role(org_id, user["user_id"])
     if not role:
-        return _error("Access denied", 403)
+        return _error("Access denied", CONST_403)
 
     invoices = await tenant.get_invoices(org_id)
     return _json_response({"invoices": invoices})
@@ -2871,7 +2883,7 @@ async def search_analytics(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     query = request.query.get("q", "")
     limit = _parse_limit(request)
@@ -2915,7 +2927,7 @@ async def advanced_search(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     results = await search_engine.advanced_search(
         site_id=site_id,
@@ -2945,7 +2957,7 @@ async def search_autocomplete(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     prefix = request.query.get("q", "")
     limit = _parse_limit(request, default=10)
@@ -2964,7 +2976,7 @@ async def popular_searches(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     popular = await search_engine.get_popular_searches(site_id, days=days)
     return _json_response({"popular_searches": popular})
@@ -2975,7 +2987,7 @@ async def popular_searches(request: web.Request) -> web.Response:
 async def search_history(request: web.Request) -> web.Response:
     search_engine = _get_search(request)
     user = _get_user(request)
-    limit = _parse_limit(request, default=20)
+    limit = _parse_limit(request, default=CONST_20)
 
     history = await search_engine.get_search_history(user["user_id"], limit)
     return _json_response({"history": history})
@@ -3005,7 +3017,7 @@ async def get_scheduler_task(request: web.Request) -> web.Response:
     name = request.match_info["name"]
     task = scheduler.get_task_status(name)
     if not task:
-        return _error("Task not found", status=404)
+        return _error("Task not found", status=CONST_404)
     return _json_response(task)
 
 
@@ -3016,7 +3028,7 @@ async def enable_scheduler_task(request: web.Request) -> web.Response:
     name = request.match_info["name"]
     enabled = await scheduler.enable_task(name)
     if not enabled:
-        return _error("Task not found", status=404)
+        return _error("Task not found", status=CONST_404)
     return _json_response({"ok": True, "enabled": True})
 
 
@@ -3027,7 +3039,7 @@ async def disable_scheduler_task(request: web.Request) -> web.Response:
     name = request.match_info["name"]
     disabled = await scheduler.disable_task(name)
     if not disabled:
-        return _error("Task not found", status=404)
+        return _error("Task not found", status=CONST_404)
     return _json_response({"ok": True, "enabled": False})
 
 
@@ -3038,7 +3050,7 @@ async def run_scheduler_task(request: web.Request) -> web.Response:
     name = request.match_info["name"]
     result = await scheduler.run_task_now(name)
     if "error" in result:
-        return _error(result["error"], status=404)
+        return _error(result["error"], status=CONST_404)
     return _json_response(result)
 
 
@@ -3078,7 +3090,7 @@ async def create_scheduled_job(request: web.Request) -> web.Response:
         config=config,
         org_id=int(org_id) if org_id else None,
     )
-    return _json_response({"id": job_id, "ok": True}, status=201)
+    return _json_response({"id": job_id, "ok": True}, status=CONST_201)
 
 
 @routes.put("/api/scheduler/jobs/{id}")
@@ -3099,7 +3111,7 @@ async def update_scheduled_job(request: web.Request) -> web.Response:
 
     updated = await scheduler.update_scheduled_job(job_id, **updates)
     if not updated:
-        return _error("Job not found", status=404)
+        return _error("Job not found", status=CONST_404)
     return _json_response({"ok": True})
 
 
@@ -3111,7 +3123,7 @@ async def delete_scheduled_job(request: web.Request) -> web.Response:
 
     deleted = await scheduler.delete_scheduled_job(job_id)
     if not deleted:
-        return _error("Job not found", status=404)
+        return _error("Job not found", status=CONST_404)
     return _json_response({"ok": True})
 
 
@@ -3120,7 +3132,7 @@ async def delete_scheduled_job(request: web.Request) -> web.Response:
 async def get_job_logs(request: web.Request) -> web.Response:
     scheduler = _get_scheduler(request)
     job_id = int(request.match_info["id"])
-    limit = _parse_limit(request, default=50)
+    limit = _parse_limit(request, default=CONST_50)
 
     logs = await scheduler.get_job_logs(job_id, limit)
     return _json_response({"logs": logs})
@@ -3143,7 +3155,7 @@ async def realtime_live(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     realtime = _get_realtime(request)
     snapshot = realtime.get_realtime_snapshot(site_id)
@@ -3158,7 +3170,7 @@ async def realtime_active_by_page(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     realtime = _get_realtime(request)
     by_page = realtime.get_active_by_page(site_id)
@@ -3173,7 +3185,7 @@ async def realtime_geographic(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     realtime = _get_realtime(request)
     geo = realtime.get_geographic_distribution(site_id)
@@ -3188,7 +3200,7 @@ async def realtime_traffic_sources(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     realtime = _get_realtime(request)
     sources = realtime.get_traffic_sources(site_id)
@@ -3203,7 +3215,7 @@ async def realtime_visitor_list(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     realtime = _get_realtime(request)
     visitors = realtime.get_visitor_list(site_id)
@@ -3223,7 +3235,7 @@ async def realtime_history(request: web.Request) -> web.Response:
 
     site = await db._fetch_one("SELECT id FROM sites WHERE id=?", (site_id,))
     if not site:
-        return _error("Site not found", status=404)
+        return _error("Site not found", status=CONST_404)
 
     realtime = _get_realtime(request)
     history = await realtime.get_historical_snapshots(site_id, minutes=minutes)

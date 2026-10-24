@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import logging
-from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .database import Database
+# --- константы вынесены FORGE refactor ---
+CONST_14_235 = 14.235
+CONST_20_5937 = 20.5937
+CONST_30 = 30
+CONST_50 = 50
+CONST_51_9253 = 51.9253
+CONST_78_9629 = 78.9629
+
 
 logger = logging.getLogger("ghostly.geomap")
 
@@ -30,10 +37,10 @@ COUNTRY_NAMES: dict[str, str] = {
 COUNTRY_CENTROIDS: dict[str, tuple[float, float]] = {
     "US": (39.8283, -98.5795), "GB": (55.3781, -3.4360), "DE": (51.1657, 10.4515),
     "FR": (46.2276, 2.2137), "JP": (36.2048, 138.2529), "CN": (35.8617, 104.1954),
-    "BR": (-14.2350, -51.9253), "IN": (20.5937, 78.9629), "CA": (56.1304, -106.3468),
+    "BR": (-CONST_14_235, -CONST_51_9253), "IN": (CONST_20_5937, CONST_78_9629), "CA": (56.1304, -106.3468),
     "AU": (-25.2744, 133.7751), "RU": (61.5240, 105.3188), "KR": (35.9078, 127.7669),
     "ES": (40.4637, -3.7492), "IT": (41.8719, 12.5674), "NL": (52.1326, 5.2913),
-    "SE": (60.1282, 18.6435), "BR": (-14.2350, -51.9253), "IN": (20.5937, 78.9629),
+    "SE": (60.1282, 18.6435), "BR": (-CONST_14_235, -CONST_51_9253), "IN": (CONST_20_5937, CONST_78_9629),
     "MX": (23.6345, -102.5528), "PL": (51.9194, 19.1451), "TR": (38.9637, 35.2433),
     "ID": (-0.7893, 113.9213), "TH": (15.8700, 100.9925), "VN": (14.0583, 108.2772),
     "PH": (12.8797, 121.7740), "MY": (4.2105, 101.9758), "SG": (1.3521, 103.8198),
@@ -75,7 +82,7 @@ class GeoMapCollector:
         return cursor.lastrowid or 0
 
     async def get_country_stats(
-        self, site_id: int, days: int = 30, limit: int = 50
+        self, site_id: int, days: int = CONST_30, limit: int = CONST_50
     ) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         rows = await self.db._fetch_all(
@@ -94,7 +101,7 @@ class GeoMapCollector:
         return rows
 
     async def get_city_stats(
-        self, site_id: int, days: int = 30, limit: int = 100
+        self, site_id: int, days: int = CONST_30, limit: int = 100
     ) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         return await self.db._fetch_all(
@@ -107,7 +114,7 @@ class GeoMapCollector:
         )
 
     async def get_top_countries(
-        self, site_id: int, days: int = 30, limit: int = 10
+        self, site_id: int, days: int = CONST_30, limit: int = 10
     ) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         rows = await self.db._fetch_all(
@@ -123,7 +130,7 @@ class GeoMapCollector:
         return rows
 
     async def get_top_cities(
-        self, site_id: int, days: int = 30, limit: int = 20
+        self, site_id: int, days: int = CONST_30, limit: int = 20
     ) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         return await self.db._fetch_all(
@@ -135,7 +142,7 @@ class GeoMapCollector:
         )
 
     async def generate_geojson(
-        self, site_id: int, days: int = 30, limit: int = 200
+        self, site_id: int, days: int = CONST_30, limit: int = 200
     ) -> dict[str, Any]:
         cities = await self.get_city_stats(site_id, days=days, limit=limit)
         features = []
@@ -172,7 +179,7 @@ class GeoMapCollector:
         }
 
     async def generate_country_geojson(
-        self, site_id: int, days: int = 30
+        self, site_id: int, days: int = CONST_30
     ) -> dict[str, Any]:
         countries = await self.get_country_stats(site_id, days=days)
         features = []
@@ -204,9 +211,9 @@ class GeoMapCollector:
         }
 
     async def get_visitor_country_distribution(
-        self, site_id: int, days: int = 30
+        self, site_id: int, days: int = CONST_30
     ) -> dict[str, Any]:
-        countries = await self.get_country_stats(site_id, days=days, limit=50)
+        countries = await self.get_country_stats(site_id, days=days, limit=CONST_50)
         total_visitors = sum(c["unique_visitors"] for c in countries)
         distribution = []
         for c in countries:
@@ -222,8 +229,8 @@ class GeoMapCollector:
             "countries": distribution,
         }
 
-    async def get_geo_summary(self, site_id: int, days: int = 30) -> dict[str, Any]:
-        countries = await self.get_country_stats(site_id, days=days, limit=50)
+    async def get_geo_summary(self, site_id: int, days: int = CONST_30) -> dict[str, Any]:
+        countries = await self.get_country_stats(site_id, days=days, limit=CONST_50)
         cities = await self.get_top_cities(site_id, days=days, limit=10)
         total_countries = len(countries)
         total_cities_result = await self.db._fetch_one(

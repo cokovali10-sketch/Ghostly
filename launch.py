@@ -9,7 +9,6 @@ with sensible defaults.
 Just double-click this file to launch Ghostly!
 """
 
-import asyncio
 import os
 import signal
 import sys
