@@ -4,10 +4,12 @@ import asyncio
 import json
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Awaitable
+from typing import Any
 
 from ghostly.core.database import Database
+
 # --- константы вынесены FORGE refactor ---
 CONST_7 = 7
 CONST_30 = 30
@@ -101,7 +103,13 @@ class TaskScheduler:
                 pass
         logger.info("Task scheduler stopped")
 
-    def register_task(self, name: str, callback: Callable[[], Awaitable[None]], cron_expr: str = "* * * * *", enabled: bool = True) -> None:
+    def register_task(
+        self,
+        name: str,
+        callback: Callable[[], Awaitable[None]],
+        cron_expr: str = "* * * * *",
+        enabled: bool = True,
+    ) -> None:
         cron = parse_cron(cron_expr)
         self._tasks[name] = {
             "name": name,
@@ -173,7 +181,9 @@ class TaskScheduler:
                     "cron_expr": row["cron_expr"],
                     "enabled": bool(row["enabled"]),
                     "last_run": row["last_run"],
-                    "next_run": datetime.fromisoformat(row["next_run"]) if row["next_run"] else None,
+                    "next_run": datetime.fromisoformat(row["next_run"])
+                    if row["next_run"]
+                    else None,
                     "run_count": row["run_count"] or 0,
                     "error_count": row["error_count"] or 0,
                     "last_error": row["last_error"],
@@ -193,10 +203,14 @@ class TaskScheduler:
                    next_run=excluded.next_run, run_count=excluded.run_count,
                    error_count=excluded.error_count, last_error=excluded.last_error""",
             (
-                name, task["cron_expr"], int(task["enabled"]),
+                name,
+                task["cron_expr"],
+                int(task["enabled"]),
                 task["last_run"],
                 task["next_run"].isoformat() if task["next_run"] else None,
-                task["run_count"], task["error_count"], task["last_error"],
+                task["run_count"],
+                task["error_count"],
+                task["last_error"],
             ),
         )
         await self.db.db.commit()
@@ -283,7 +297,9 @@ class TaskScheduler:
         await self.db.db.commit()
         return result.rowcount > 0
 
-    async def log_job_run(self, job_id: int, status: str, duration_ms: float = 0, error: str | None = None) -> int:
+    async def log_job_run(
+        self, job_id: int, status: str, duration_ms: float = 0, error: str | None = None
+    ) -> int:
         cursor = await self.db.db.execute(
             """INSERT INTO job_run_logs (job_id, status, duration_ms, error, ran_at)
                VALUES (?, ?, ?, ?, datetime('now'))""",
@@ -305,6 +321,7 @@ class ReportGenerator:
 
     async def generate_site_report(self, site_id: int, days: int = CONST_7) -> dict[str, Any]:
         from ghostly.core.aggregator import Aggregator
+
         aggregator = Aggregator(self.db)
         dashboard = await aggregator.get_dashboard(site_id, days)
 
@@ -422,9 +439,7 @@ class DataCleanup:
 
     async def cleanup_old_pageviews(self, retention_days: int = CONST_90) -> int:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
-        result = await self.db.db.execute(
-            "DELETE FROM pageviews WHERE created_at < ?", (cutoff,)
-        )
+        result = await self.db.db.execute("DELETE FROM pageviews WHERE created_at < ?", (cutoff,))
         await self.db.db.commit()
         deleted = result.rowcount
         if deleted > 0:
@@ -433,9 +448,7 @@ class DataCleanup:
 
     async def cleanup_old_events(self, retention_days: int = CONST_90) -> int:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
-        result = await self.db.db.execute(
-            "DELETE FROM events WHERE created_at < ?", (cutoff,)
-        )
+        result = await self.db.db.execute("DELETE FROM events WHERE created_at < ?", (cutoff,))
         await self.db.db.commit()
         deleted = result.rowcount
         if deleted > 0:
@@ -488,9 +501,7 @@ class DataCleanup:
 
     async def cleanup_expired_sessions(self) -> int:
         now = datetime.now(timezone.utc).isoformat()
-        result = await self.db.db.execute(
-            "DELETE FROM user_sessions WHERE expires_at < ?", (now,)
-        )
+        result = await self.db.db.execute("DELETE FROM user_sessions WHERE expires_at < ?", (now,))
         await self.db.db.commit()
         return result.rowcount
 
@@ -514,6 +525,7 @@ class EmailReportSender:
 
     async def send_scheduled_reports(self) -> dict[str, Any]:
         from ghostly.core.email import EmailReporter
+
         reporter = EmailReporter(self.db)
         await reporter.load_config()
 
@@ -529,7 +541,7 @@ class EmailReportSender:
             last_sent = schedule.get("last_sent")
             cron_expr = schedule.get("cron_expr", "0 8 * * 1")
             try:
-                cron = parse_cron(cron_expr)
+                parse_cron(cron_expr)
                 now = datetime.now(timezone.utc)
                 if last_sent:
                     last_dt = datetime.fromisoformat(last_sent)
@@ -539,16 +551,22 @@ class EmailReportSender:
                 pass
 
             site_id = schedule.get("site_id")
-            recipients = json.loads(schedule.get("recipients", "[]")) if isinstance(schedule.get("recipients"), str) else schedule.get("recipients", [])
+            recipients = (
+                json.loads(schedule.get("recipients", "[]"))
+                if isinstance(schedule.get("recipients"), str)
+                else schedule.get("recipients", [])
+            )
             days = schedule.get("days", CONST_7)
 
             if not recipients or not site_id:
                 continue
 
             try:
-                result = await reporter.send_report(site_id, recipients, days=days)
+                await reporter.send_report(site_id, recipients, days=days)
                 sent += 1
-                results.append({"site_id": site_id, "status": "sent", "recipients": len(recipients)})
+                results.append(
+                    {"site_id": site_id, "status": "sent", "recipients": len(recipients)}
+                )
             except Exception as exc:
                 failed += 1
                 results.append({"site_id": site_id, "status": "failed", "error": str(exc)})

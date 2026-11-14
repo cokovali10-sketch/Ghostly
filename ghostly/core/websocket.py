@@ -7,6 +7,7 @@ import time
 from typing import Any
 
 from aiohttp import web
+
 # --- константы вынесены FORGE refactor ---
 CONST_5 = 5.0
 CONST_1024 = 1024
@@ -69,11 +70,7 @@ class WebSocketManager:
 
     def get_site_clients(self, site_id: int) -> list[dict[str, Any]]:
         client_ids = self._site_clients.get(site_id, set())
-        return [
-            self._clients[cid].to_dict()
-            for cid in client_ids
-            if cid in self._clients
-        ]
+        return [self._clients[cid].to_dict() for cid in client_ids if cid in self._clients]
 
     async def start(self) -> None:
         """Start the heartbeat background task."""
@@ -125,7 +122,8 @@ class WebSocketManager:
 
         logger.info(
             "Client %s connected to site %d (total: %d, site: %d)",
-            client_id, site_id,
+            client_id,
+            site_id,
             self.total_connections,
             self.get_site_connection_count(site_id),
         )
@@ -144,18 +142,21 @@ class WebSocketManager:
                         del self._site_clients[site_id]
                 logger.info(
                     "Client %s disconnected from site %d (total: %d, site: %d)",
-                    client_id, site_id,
+                    client_id,
+                    site_id,
                     self.total_connections,
                     self.get_site_connection_count(site_id),
                 )
 
     async def broadcast_to_site(self, site_id: int, event_type: str, data: dict[str, Any]) -> int:
         """Broadcast a message to all clients connected to a specific site."""
-        message = json.dumps({
-            "type": event_type,
-            "data": data,
-            "timestamp": time.time(),
-        })
+        message = json.dumps(
+            {
+                "type": event_type,
+                "data": data,
+                "timestamp": time.time(),
+            }
+        )
         sent = 0
         dead_clients: list[str] = []
 
@@ -200,11 +201,13 @@ class WebSocketManager:
         if not client or not client.is_alive:
             return False
         try:
-            message = json.dumps({
-                "type": event_type,
-                "data": data,
-                "timestamp": time.time(),
-            })
+            message = json.dumps(
+                {
+                    "type": event_type,
+                    "data": data,
+                    "timestamp": time.time(),
+                }
+            )
             await client.ws.send_str(message)
             client.messages_sent += 1
             return True
@@ -214,12 +217,14 @@ class WebSocketManager:
 
     async def queue_broadcast(self, site_id: int, event_type: str, data: dict[str, Any]) -> None:
         """Queue a broadcast message for batch processing."""
-        await self._message_queue.put({
-            "site_id": site_id,
-            "event_type": event_type,
-            "data": data,
-            "timestamp": time.time(),
-        })
+        await self._message_queue.put(
+            {
+                "site_id": site_id,
+                "event_type": event_type,
+                "data": data,
+                "timestamp": time.time(),
+            }
+        )
 
     async def _batch_broadcast_loop(self) -> None:
         """Background task to process queued broadcasts in batches."""
@@ -310,9 +315,7 @@ class WebSocketManager:
             site_stats[site_id] = {
                 "connected_clients": len(client_ids),
                 "clients": [
-                    self._clients[cid].to_dict()
-                    for cid in client_ids
-                    if cid in self._clients
+                    self._clients[cid].to_dict() for cid in client_ids if cid in self._clients
                 ],
             }
         return {
@@ -352,16 +355,18 @@ class WebSocketHandler:
         client = await self.manager.register(ws, site_id)
 
         try:
-            welcome = json.dumps({
-                "type": "connected",
-                "data": {
-                    "client_id": client.client_id,
-                    "site_id": site_id,
-                    "message": "Connected to Ghostly real-time dashboard",
-                    "heartbeat_interval": self.manager._ping_interval,
-                },
-                "timestamp": time.time(),
-            })
+            welcome = json.dumps(
+                {
+                    "type": "connected",
+                    "data": {
+                        "client_id": client.client_id,
+                        "site_id": site_id,
+                        "message": "Connected to Ghostly real-time dashboard",
+                        "heartbeat_interval": self.manager._ping_interval,
+                    },
+                    "timestamp": time.time(),
+                }
+            )
             await ws.send_str(welcome)
             client.messages_sent += 1
 
@@ -392,10 +397,12 @@ class WebSocketHandler:
 
         if msg_type == "ping":
             client.last_pong = time.time()
-            pong = json.dumps({
-                "type": "pong",
-                "timestamp": time.time(),
-            })
+            pong = json.dumps(
+                {
+                    "type": "pong",
+                    "timestamp": time.time(),
+                }
+            )
             try:
                 await client.ws.send_str(pong)
                 client.messages_sent += 1
@@ -409,11 +416,13 @@ class WebSocketHandler:
             channel = msg.get("channel", "default")
             if channel not in client.subscriptions:
                 client.subscriptions.append(channel)
-            ack = json.dumps({
-                "type": "subscribed",
-                "channel": channel,
-                "timestamp": time.time(),
-            })
+            ack = json.dumps(
+                {
+                    "type": "subscribed",
+                    "channel": channel,
+                    "timestamp": time.time(),
+                }
+            )
             try:
                 await client.ws.send_str(ack)
                 client.messages_sent += 1
@@ -424,11 +433,13 @@ class WebSocketHandler:
             channel = msg.get("channel", "default")
             if channel in client.subscriptions:
                 client.subscriptions.remove(channel)
-            ack = json.dumps({
-                "type": "unsubscribed",
-                "channel": channel,
-                "timestamp": time.time(),
-            })
+            ack = json.dumps(
+                {
+                    "type": "unsubscribed",
+                    "channel": channel,
+                    "timestamp": time.time(),
+                }
+            )
             try:
                 await client.ws.send_str(ack)
                 client.messages_sent += 1
@@ -437,17 +448,18 @@ class WebSocketHandler:
 
         elif msg_type == "request_stats":
             from ghostly.core.aggregator import Aggregator
-            from ghostly.core.database import Database
 
             db = client.ws._request.app.get("db") if hasattr(client.ws, "_request") else None
             if db:
                 aggregator = Aggregator(db)
                 stats = await aggregator.get_realtime_stats(client.site_id)
-                response = json.dumps({
-                    "type": "stats_response",
-                    "data": stats,
-                    "timestamp": time.time(),
-                })
+                response = json.dumps(
+                    {
+                        "type": "stats_response",
+                        "data": stats,
+                        "timestamp": time.time(),
+                    }
+                )
                 try:
                     await client.ws.send_str(response)
                     client.messages_sent += 1
@@ -456,14 +468,16 @@ class WebSocketHandler:
 
         elif msg_type == "get_connections":
             site_count = self.manager.get_site_connection_count(client.site_id)
-            response = json.dumps({
-                "type": "connections_info",
-                "data": {
-                    "site_connections": site_count,
-                    "total_connections": self.manager.total_connections,
-                },
-                "timestamp": time.time(),
-            })
+            response = json.dumps(
+                {
+                    "type": "connections_info",
+                    "data": {
+                        "site_connections": site_count,
+                        "total_connections": self.manager.total_connections,
+                    },
+                    "timestamp": time.time(),
+                }
+            )
             try:
                 await client.ws.send_str(response)
                 client.messages_sent += 1

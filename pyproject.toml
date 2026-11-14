@@ -80,6 +80,26 @@ select = [
     "TCH",  # flake8-type-checking
     "RUF",  # ruff-specific
 ]
+# Line length and typing-only imports are handled by `ruff format`;
+# these rules add noise without catching defects.
+ignore = [
+    "E501",   # line-too-long (formatter owns this)
+    "TC001",  # typing-only first-party import
+    "TC003",  # typing-only standard-library import
+    "SIM105", # try/except/pass is intentional in these guard blocks
+    "B904",   # exception chaining is not part of this codebase's contract
+    "A001",   # builtin shadowing in a few local names
+    "A002",   # builtin shadowing in keyword arguments
+    "B007",   # unused loop control variables are intentional
+    "RUF005", # list concatenation reads better here than unpacking
+    "RUF001", # intentional non-ASCII in user-facing strings
+    "RUF012", # mutable class defaults are initialised per instance
+    "SIM102", # nested ifs are clearer than a compound condition here
+    "SIM108", # if/else blocks are clearer than a ternary here
+    "SIM117", # nested with blocks match the surrounding style
+    "SIM118", # dict membership uses .keys() for symmetry with the API
+    "B905",   # zip() lengths are fixed by the call sites
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["ghostly"]

@@ -4,10 +4,12 @@ import importlib
 import importlib.util
 import logging
 import sys
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from .database import Database
+
 # --- константы вынесены FORGE refactor ---
 CONST_30 = 30
 

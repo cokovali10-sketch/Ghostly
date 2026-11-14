@@ -12,7 +12,8 @@ from ghostly.core.auth import AuthManager
 from ghostly.core.database import Database
 from ghostly.core.plugins import PluginManager
 from ghostly.core.themes import ThemeManager
-from ghostly.core.websocket import WebSocketManager, WebSocketHandler
+from ghostly.core.websocket import WebSocketHandler, WebSocketManager
+
 # --- константы вынесены FORGE refactor ---
 CONST_200 = 200
 CONST_501 = 501
@@ -49,7 +50,9 @@ async def cors_middleware(request: web.Request, handler):
 
     response.headers["Access-Control-Allow-Origin"] = origin
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, X-API-Key"
+    response.headers["Access-Control-Allow-Headers"] = (
+        "Content-Type, Authorization, X-Requested-With, X-API-Key"
+    )
     response.headers["Access-Control-Allow-Credentials"] = "true"
     response.headers["Access-Control-Max-Age"] = "86400"
     return response
@@ -111,7 +114,11 @@ async def rate_limit_middleware(request: web.Request, handler):
     if request.path.startswith("/api/track") or request.path == "/health":
         return await handler(request)
 
-    ip = request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or request.remote or "0.0.0.0"
+    ip = (
+        request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        or request.remote
+        or "0.0.0.0"
+    )
 
     auth: AuthManager | None = request.app.get("auth")
     if auth:
@@ -156,6 +163,7 @@ async def tenant_middleware(request: web.Request, handler):
     if host and "." in host:
         try:
             from ghostly.core.multi_tenant import TenantManager
+
             db: Database | None = request.app.get("db")
             if db:
                 tenant_mgr = TenantManager(db)
@@ -187,7 +195,11 @@ async def theme_middleware(request: web.Request, handler):
                     if css and css != ":root {}":
                         theme_tag = f'<style id="ghostly-theme">{css}</style>'
                         if isinstance(response, web.Response) and response.body:
-                            body = response.body.decode("utf-8") if isinstance(response.body, bytes) else str(response.body)
+                            body = (
+                                response.body.decode("utf-8")
+                                if isinstance(response.body, bytes)
+                                else str(response.body)
+                            )
                             body = body.replace("</head>", f"{theme_tag}\n</head>")
                             response.body = body.encode("utf-8")
                             response.content_length = len(response.body)
@@ -218,7 +230,9 @@ async def dashboard_index(request: web.Request) -> web.Response:
         html = render_template("index.html")
         return web.Response(text=html, content_type="text/html")
     except FileNotFoundError:
-        return web.Response(text="<h1>Dashboard not configured</h1>", status=CONST_501, content_type="text/html")
+        return web.Response(
+            text="<h1>Dashboard not configured</h1>", status=CONST_501, content_type="text/html"
+        )
 
 
 async def dashboard_site(request: web.Request) -> web.Response:
@@ -227,7 +241,11 @@ async def dashboard_site(request: web.Request) -> web.Response:
         html = render_template("site.html", {"site_id": site_id})
         return web.Response(text=html, content_type="text/html")
     except FileNotFoundError:
-        return web.Response(text="<h1>Site dashboard not configured</h1>", status=CONST_501, content_type="text/html")
+        return web.Response(
+            text="<h1>Site dashboard not configured</h1>",
+            status=CONST_501,
+            content_type="text/html",
+        )
 
 
 # ── Health check handler ────────────────────────────────────────────────
@@ -264,7 +282,9 @@ async def health_check(request: web.Request) -> web.Response:
                 "websocket": ws_status,
                 "scheduler": scheduler_status,
             },
-            "timestamp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+            "timestamp": __import__("datetime")
+            .datetime.now(__import__("datetime").timezone.utc)
+            .isoformat(),
         },
         status=status_code,
     )
@@ -293,8 +313,13 @@ async def on_startup(app: web.Application) -> None:
     logger.info("Plugin manager ready (%d plugins loaded)", loaded)
 
     from ghostly.core.scheduler import (
-        TaskScheduler, ReportGenerator, DataAggregator, DataCleanup, EmailReportSender,
+        DataAggregator,
+        DataCleanup,
+        EmailReportSender,
+        ReportGenerator,
+        TaskScheduler,
     )
+
     scheduler = TaskScheduler(db)
     report_gen = ReportGenerator(db)
     aggregator = DataAggregator(db)
@@ -302,8 +327,12 @@ async def on_startup(app: web.Application) -> None:
     email_sender = EmailReportSender(db)
 
     scheduler.register_task("data_cleanup", lambda: cleanup.run_full_cleanup(), "0 2 * * *")
-    scheduler.register_task("daily_aggregation", lambda: _run_daily_aggregation(db, aggregator), "0 3 * * *")
-    scheduler.register_task("email_reports", lambda: email_sender.send_scheduled_reports(), "0 8 * * 1")
+    scheduler.register_task(
+        "daily_aggregation", lambda: _run_daily_aggregation(db, aggregator), "0 3 * * *"
+    )
+    scheduler.register_task(
+        "email_reports", lambda: email_sender.send_scheduled_reports(), "0 8 * * 1"
+    )
     scheduler.register_task("snapshot_realtime", lambda: _run_realtime_snapshot(db), "*/5 * * * *")
 
     await scheduler.start()
@@ -326,6 +355,7 @@ async def _run_daily_aggregation(db: Database, aggregator) -> None:
 
 async def _run_realtime_snapshot(db: Database) -> None:
     from ghostly.core.realtime import RealtimeManager
+
     realtime = RealtimeManager(db)
     sites = await db._fetch_all("SELECT id FROM sites WHERE is_active=1")
     for site in sites:
@@ -416,27 +446,34 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         description="Ghostly v6.0 – privacy-focused analytics server with multi-tenant support",
     )
     parser.add_argument(
-        "--host", default=DEFAULT_HOST,
+        "--host",
+        default=DEFAULT_HOST,
         help=f"Host to bind to (default: {DEFAULT_HOST})",
     )
     parser.add_argument(
-        "--port", type=int, default=DEFAULT_PORT,
+        "--port",
+        type=int,
+        default=DEFAULT_PORT,
         help=f"Port to listen on (default: {DEFAULT_PORT})",
     )
     parser.add_argument(
-        "--db", default=None,
+        "--db",
+        default=None,
         help="Path to SQLite database file (default: ghostly_data.db)",
     )
     parser.add_argument(
-        "--secret-key", default=None,
+        "--secret-key",
+        default=None,
         help="Secret key for JWT tokens (default: auto-generated)",
     )
     parser.add_argument(
-        "--cors-origins", default="*",
+        "--cors-origins",
+        default="*",
         help="Comma-separated CORS origins (default: *)",
     )
     parser.add_argument(
-        "--log-level", default="INFO",
+        "--log-level",
+        default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="Logging level (default: INFO)",
     )
@@ -468,9 +505,7 @@ def main(argv: list[str] | None = None) -> None:
             app,
             host=args.host,
             port=args.port,
-            print=lambda _: logger.info(
-                "Server running at http://%s:%s", args.host, args.port
-            ),
+            print=lambda _: logger.info("Server running at http://%s:%s", args.host, args.port),
             shutdown_timeout=5.0,
         )
     except KeyboardInterrupt:

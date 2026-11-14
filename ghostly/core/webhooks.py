@@ -77,25 +77,27 @@ class WebhookManager:
 
         for attempt in range(1, self._max_retries + 1):
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
+                async with (
+                    aiohttp.ClientSession() as session,
+                    session.post(
                         url,
                         data=body_bytes,
                         headers=headers,
                         timeout=aiohttp.ClientTimeout(total=10),
-                    ) as resp:
-                        last_status = resp.status
-                        if 200 <= resp.status < 300:
-                            await self.db.update_webhook_status(wh_id, last_status)
-                            self._log_delivery(wh_id, event_type, last_status, None)
-                            return {
-                                "webhook_id": wh_id,
-                                "url": url,
-                                "status": last_status,
-                                "attempt": attempt,
-                                "ok": True,
-                            }
-                        last_error = f"HTTP {resp.status}"
+                    ) as resp,
+                ):
+                    last_status = resp.status
+                    if 200 <= resp.status < 300:
+                        await self.db.update_webhook_status(wh_id, last_status)
+                        self._log_delivery(wh_id, event_type, last_status, None)
+                        return {
+                            "webhook_id": wh_id,
+                            "url": url,
+                            "status": last_status,
+                            "attempt": attempt,
+                            "ok": True,
+                        }
+                    last_error = f"HTTP {resp.status}"
             except asyncio.TimeoutError:
                 last_error = "timeout"
             except aiohttp.ClientError as exc:
@@ -107,7 +109,10 @@ class WebhookManager:
                 delay = self._base_delay * (2 ** (attempt - 1))
                 logger.warning(
                     "Webhook %d attempt %d failed (%s), retrying in %.1fs",
-                    wh_id, attempt, last_error, delay,
+                    wh_id,
+                    attempt,
+                    last_error,
+                    delay,
                 )
                 await asyncio.sleep(delay)
 
@@ -116,7 +121,9 @@ class WebhookManager:
 
         logger.error(
             "Webhook %d failed after %d attempts: %s",
-            wh_id, self._max_retries, last_error,
+            wh_id,
+            self._max_retries,
+            last_error,
         )
 
         return {
@@ -146,7 +153,10 @@ class WebhookManager:
     ) -> None:
         logger.info(
             "Webhook %d delivery: event=%s status=%d error=%s",
-            webhook_id, event_type, status, error,
+            webhook_id,
+            event_type,
+            status,
+            error,
         )
 
     async def get_delivery_history(

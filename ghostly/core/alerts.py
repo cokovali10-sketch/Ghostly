@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
 from datetime import datetime, timezone
@@ -7,6 +8,7 @@ from enum import Enum
 from typing import Any
 
 from .database import Database
+
 # --- константы вынесены FORGE refactor ---
 CONST_30 = 30
 CONST_60 = 60.0
@@ -128,7 +130,9 @@ class AlertManager:
         self._active_alerts.pop(alert_id, None)
         return result.rowcount > 0
 
-    async def check_alerts(self, site_id: int, pageview_data: dict[str, Any]) -> list[dict[str, Any]]:
+    async def check_alerts(
+        self, site_id: int, pageview_data: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         """Check all active alerts for a site against current data.
 
         Called on each pageview to see if any thresholds are breached.
@@ -150,21 +154,15 @@ class AlertManager:
             current_value = 0.0
 
             if alert["alert_type"] == AlertType.PAGEVIEWS_THRESHOLD.value:
-                current_value = await self._get_pageview_count(
-                    site_id, alert["window_minutes"]
-                )
+                current_value = await self._get_pageview_count(site_id, alert["window_minutes"])
                 should_trigger = current_value >= alert["threshold"]
 
             elif alert["alert_type"] == AlertType.VISITOR_SPIKE.value:
-                current_value = await self._get_visitor_count(
-                    site_id, alert["window_minutes"]
-                )
+                current_value = await self._get_visitor_count(site_id, alert["window_minutes"])
                 should_trigger = current_value >= alert["threshold"]
 
             elif alert["alert_type"] == AlertType.ERROR_RATE.value:
-                current_value = await self._get_error_rate(
-                    site_id, alert["window_minutes"]
-                )
+                current_value = await self._get_error_rate(site_id, alert["window_minutes"])
                 should_trigger = current_value >= alert["threshold"]
 
             if should_trigger:
@@ -258,7 +256,14 @@ class AlertManager:
         await self.db.db.execute(
             """INSERT INTO alert_history (alert_id, site_id, alert_type, current_value, threshold, triggered_at)
                VALUES (?, ?, ?, ?, ?, ?)""",
-            (alert_id, alert["site_id"], alert["alert_type"], current_value, alert["threshold"], now),
+            (
+                alert_id,
+                alert["site_id"],
+                alert["alert_type"],
+                current_value,
+                alert["threshold"],
+                now,
+            ),
         )
         await self.db.db.commit()
 
@@ -274,8 +279,11 @@ class AlertManager:
 
         logger.warning(
             "Alert triggered: %s (site %d) - %s: %.1f >= %.1f",
-            alert["name"], alert["site_id"], alert["alert_type"],
-            current_value, alert["threshold"],
+            alert["name"],
+            alert["site_id"],
+            alert["alert_type"],
+            current_value,
+            alert["threshold"],
         )
 
         return triggered

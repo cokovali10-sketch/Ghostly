@@ -5,10 +5,12 @@ import json
 import logging
 import time
 from collections import defaultdict
+from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
-from typing import Any, AsyncIterator
+from typing import Any
 
 from ghostly.core.database import Database
+
 # --- константы вынесены FORGE refactor ---
 CONST_60 = 60
 CONST_300 = 300
@@ -31,7 +33,9 @@ class RealtimeManager:
         self._cleanup_interval = CONST_60
         self._last_cleanup = time.monotonic()
 
-    async def track_visitor(self, site_id: int, visitor_id: str, page: str = "/", country: str = "", referrer: str = "") -> None:
+    async def track_visitor(
+        self, site_id: int, visitor_id: str, page: str = "/", country: str = "", referrer: str = ""
+    ) -> None:
         async with self._lock:
             now = time.time()
             if site_id not in self._visitors:
@@ -66,14 +70,20 @@ class RealtimeManager:
             }
             self._events[site_id].append(event)
             if len(self._events[site_id]) > self._max_events:
-                self._events[site_id] = self._events[site_id][-self._max_events:]
+                self._events[site_id] = self._events[site_id][-self._max_events :]
 
             await self._broadcast(site_id, event)
 
         if time.monotonic() - self._last_cleanup > self._cleanup_interval:
             await self._cleanup_stale()
 
-    async def track_event(self, site_id: int, event_name: str, visitor_id: str = "", meta: dict[str, Any] | None = None) -> None:
+    async def track_event(
+        self,
+        site_id: int,
+        event_name: str,
+        visitor_id: str = "",
+        meta: dict[str, Any] | None = None,
+    ) -> None:
         event = {
             "type": "custom_event",
             "name": event_name,
@@ -84,7 +94,7 @@ class RealtimeManager:
         async with self._lock:
             self._events[site_id].append(event)
             if len(self._events[site_id]) > self._max_events:
-                self._events[site_id] = self._events[site_id][-self._max_events:]
+                self._events[site_id] = self._events[site_id][-self._max_events :]
         await self._broadcast(site_id, event)
 
     def get_active_visitors(self, site_id: int, window_seconds: int = CONST_300) -> dict[str, Any]:
@@ -115,24 +125,30 @@ class RealtimeManager:
                 pages[data["page"]] += 1
         return dict(pages)
 
-    def get_visitor_list(self, site_id: int, window_seconds: int = CONST_300) -> list[dict[str, Any]]:
+    def get_visitor_list(
+        self, site_id: int, window_seconds: int = CONST_300
+    ) -> list[dict[str, Any]]:
         now = time.time()
         cutoff = now - window_seconds
         result = []
         for vid, data in self._visitors.get(site_id, {}).items():
             if data["last_seen"] >= cutoff:
-                result.append({
-                    "visitor_id": vid,
-                    "page": data["page"],
-                    "country": data["country"],
-                    "duration_seconds": round(now - data["entered_at"]),
-                })
+                result.append(
+                    {
+                        "visitor_id": vid,
+                        "page": data["page"],
+                        "country": data["country"],
+                        "duration_seconds": round(now - data["entered_at"]),
+                    }
+                )
         return result
 
     def get_geographic_distribution(self, site_id: int) -> dict[str, Any]:
         geo = dict(self._geo_data.get(site_id, {}))
         total = sum(geo.values()) or 1
-        distribution = {k: {"count": v, "percentage": round(v / total * 100, 1)} for k, v in geo.items()}
+        distribution = {
+            k: {"count": v, "percentage": round(v / total * 100, 1)} for k, v in geo.items()
+        }
         sorted_dist = dict(sorted(distribution.items(), key=lambda x: x[1]["count"], reverse=True))
         return {
             "countries": sorted_dist,
@@ -143,7 +159,9 @@ class RealtimeManager:
     def get_traffic_sources(self, site_id: int) -> dict[str, Any]:
         sources = dict(self._source_data.get(site_id, {}))
         total = sum(sources.values()) or 1
-        distribution = {k: {"count": v, "percentage": round(v / total * 100, 1)} for k, v in sources.items()}
+        distribution = {
+            k: {"count": v, "percentage": round(v / total * 100, 1)} for k, v in sources.items()
+        }
         sorted_dist = dict(sorted(distribution.items(), key=lambda x: x[1]["count"], reverse=True))
         return {
             "sources": sorted_dist,
@@ -208,7 +226,8 @@ class RealtimeManager:
             stale_threshold = now - 600
             for site_id in list(self._visitors.keys()):
                 stale = [
-                    vid for vid, data in self._visitors[site_id].items()
+                    vid
+                    for vid, data in self._visitors[site_id].items()
                     if data["last_seen"] < stale_threshold
                 ]
                 for vid in stale:
@@ -217,6 +236,7 @@ class RealtimeManager:
 
     def _extract_source(self, referrer: str) -> str:
         from urllib.parse import urlparse
+
         try:
             parsed = urlparse(referrer)
             host = parsed.hostname or ""
@@ -261,7 +281,9 @@ class RealtimeManager:
         except Exception as exc:
             logger.warning("Failed to persist realtime snapshot: %s", exc)
 
-    async def get_historical_snapshots(self, site_id: int, minutes: int = CONST_60) -> list[dict[str, Any]]:
+    async def get_historical_snapshots(
+        self, site_id: int, minutes: int = CONST_60
+    ) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
         rows = await self.db._fetch_all(
             """SELECT active_visitors, data, created_at

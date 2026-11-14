@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ghostly.core.database import Database
+
 # --- константы вынесены FORGE refactor ---
 CONST_3 = 3
 CONST_5 = 5
@@ -141,16 +142,16 @@ class TenantManager:
         await self.db.db.commit()
 
         await self.db.log_audit(
-            owner_user_id, "org_create", "organization",
+            owner_user_id,
+            "org_create",
+            "organization",
             {"org_id": org_id, "name": name, "plan": plan},
         )
 
         return await self.get_organization(org_id)
 
     async def get_organization(self, org_id: int) -> dict[str, Any] | None:
-        org = await self.db._fetch_one(
-            "SELECT * FROM organizations WHERE id=?", (org_id,)
-        )
+        org = await self.db._fetch_one("SELECT * FROM organizations WHERE id=?", (org_id,))
         if org:
             org["settings"] = json.loads(org.get("settings") or "{}")
         return org
@@ -165,9 +166,19 @@ class TenantManager:
         return org
 
     async def update_organization(self, org_id: int, **kwargs: Any) -> bool:
-        allowed = {"name", "plan", "subdomain", "is_active", "settings", "billing_email",
-                    "max_sites", "max_pageviews_monthly", "max_team_members", "max_api_keys",
-                    "retention_days"}
+        allowed = {
+            "name",
+            "plan",
+            "subdomain",
+            "is_active",
+            "settings",
+            "billing_email",
+            "max_sites",
+            "max_pageviews_monthly",
+            "max_team_members",
+            "max_api_keys",
+            "retention_days",
+        }
         updates = {k: v for k, v in kwargs.items() if k in allowed}
         if not updates:
             return False
@@ -180,7 +191,9 @@ class TenantManager:
         return True
 
     async def delete_organization(self, org_id: int) -> bool:
-        result = await self.db.db.execute("UPDATE organizations SET is_active=0 WHERE id=?", (org_id,))
+        result = await self.db.db.execute(
+            "UPDATE organizations SET is_active=0 WHERE id=?", (org_id,)
+        )
         await self.db.db.commit()
         return result.rowcount > 0
 
@@ -222,7 +235,7 @@ class TenantManager:
         if existing:
             raise TenantError("User is already a member", CONST_409)
 
-        cursor = await self.db.db.execute(
+        await self.db.db.execute(
             """INSERT INTO org_members (org_id, user_id, role, invited_by)
                VALUES (?, ?, ?, ?)""",
             (org_id, user_id, role, invited_by),
@@ -230,7 +243,9 @@ class TenantManager:
         await self.db.db.commit()
 
         await self.db.log_audit(
-            invited_by, "member_add", "organization",
+            invited_by,
+            "member_add",
+            "organization",
             {"org_id": org_id, "user_id": user_id, "role": role},
         )
 
@@ -288,7 +303,9 @@ class TenantManager:
             (user_id,),
         )
 
-    async def check_user_role(self, org_id: int, user_id: int, required_roles: list[str] | None = None) -> str | None:
+    async def check_user_role(
+        self, org_id: int, user_id: int, required_roles: list[str] | None = None
+    ) -> str | None:
         if required_roles is None:
             required_roles = ["owner", "admin", "editor", "viewer"]
         member = await self.get_member(org_id, user_id)
@@ -462,9 +479,7 @@ class TenantManager:
         )
         await self.db.db.commit()
 
-        return await self.db._fetch_one(
-            "SELECT * FROM invoices WHERE id=?", (cursor.lastrowid,)
-        )
+        return await self.db._fetch_one("SELECT * FROM invoices WHERE id=?", (cursor.lastrowid,))
 
     async def get_invoices(self, org_id: int, limit: int = CONST_50) -> list[dict[str, Any]]:
         return await self.db._fetch_all(
@@ -504,8 +519,24 @@ class TenantManager:
         if "--" in subdomain:
             return {"valid": False, "error": "Cannot contain consecutive hyphens"}
 
-        reserved = {"www", "api", "admin", "mail", "ftp", "ns1", "ns2", "smtp", "pop",
-                     "imap", "ghostly", "app", "dashboard", "status", "docs", "support"}
+        reserved = {
+            "www",
+            "api",
+            "admin",
+            "mail",
+            "ftp",
+            "ns1",
+            "ns2",
+            "smtp",
+            "pop",
+            "imap",
+            "ghostly",
+            "app",
+            "dashboard",
+            "status",
+            "docs",
+            "support",
+        }
         if subdomain in reserved:
             return {"valid": False, "error": "This subdomain is reserved"}
 
@@ -538,7 +569,9 @@ class TenantManager:
         )
 
         await self.db.log_audit(
-            org.get("owner_user_id"), "plan_upgrade", "organization",
+            org.get("owner_user_id"),
+            "plan_upgrade",
+            "organization",
             {"org_id": org_id, "old_plan": org.get("plan"), "new_plan": new_plan},
         )
 
@@ -558,6 +591,7 @@ class TenantManager:
 
     def _generate_subdomain(self, name: str) -> str:
         import re
+
         sub = re.sub(r"[^a-z0-9]", "", name.lower().replace(" ", ""))
         if not sub or not sub[0].isalpha():
             sub = "org" + sub

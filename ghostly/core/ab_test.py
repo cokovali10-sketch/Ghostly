@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .database import Database
+
 # --- константы вынесены FORGE refactor ---
 CONST_0_05 = 0.05
 CONST_30 = 30
@@ -123,8 +124,12 @@ class ABTestManager:
         return result.rowcount > 0
 
     async def delete_experiment(self, experiment_id: int) -> bool:
-        await self.db.db.execute("DELETE FROM ab_conversions WHERE experiment_id=?", (experiment_id,))
-        await self.db.db.execute("DELETE FROM ab_assignments WHERE experiment_id=?", (experiment_id,))
+        await self.db.db.execute(
+            "DELETE FROM ab_conversions WHERE experiment_id=?", (experiment_id,)
+        )
+        await self.db.db.execute(
+            "DELETE FROM ab_assignments WHERE experiment_id=?", (experiment_id,)
+        )
         await self.db.db.execute("DELETE FROM ab_variants WHERE experiment_id=?", (experiment_id,))
         result = await self.db.db.execute("DELETE FROM ab_experiments WHERE id=?", (experiment_id,))
         await self.db.db.commit()
@@ -135,9 +140,7 @@ class ABTestManager:
         hash_val = int(hashlib.sha256(raw.encode()).hexdigest(), 16)
         return hash_val % CONST_10000
 
-    async def assign_visitor(
-        self, experiment_id: int, visitor_id: str
-    ) -> dict[str, Any] | None:
+    async def assign_visitor(self, experiment_id: int, visitor_id: str) -> dict[str, Any] | None:
         existing = await self.db._fetch_one(
             """SELECT a.variant_id, v.name AS variant_name, v.is_control
                FROM ab_assignments a
@@ -257,17 +260,19 @@ class ABTestManager:
             )
             unique_conv = unique_converters["count"] if unique_converters else 0
 
-            variant_stats.append({
-                "variant_id": variant["id"],
-                "variant_name": variant["name"],
-                "is_control": bool(variant["is_control"]),
-                "visitors": visitors,
-                "conversions": conv_count,
-                "unique_converters": unique_conv,
-                "conversion_rate": conversion_rate,
-                "total_value": total_value,
-                "avg_value_per_conversion": avg_value,
-            })
+            variant_stats.append(
+                {
+                    "variant_id": variant["id"],
+                    "variant_name": variant["name"],
+                    "is_control": bool(variant["is_control"]),
+                    "visitors": visitors,
+                    "conversions": conv_count,
+                    "unique_converters": unique_conv,
+                    "conversion_rate": conversion_rate,
+                    "total_value": total_value,
+                    "avg_value_per_conversion": avg_value,
+                }
+            )
 
         control = next((v for v in variant_stats if v["is_control"]), None)
         for vs in variant_stats:
@@ -275,7 +280,8 @@ class ABTestManager:
                 if control["conversion_rate"] > 0:
                     lift = round(
                         (vs["conversion_rate"] - control["conversion_rate"])
-                        / control["conversion_rate"] * 100,
+                        / control["conversion_rate"]
+                        * 100,
                         2,
                     )
                 else:
@@ -300,9 +306,7 @@ class ABTestManager:
         p_pool = (conversions_a + conversions_b) / (visitors_a + visitors_b)
         if p_pool == 0 or p_pool == 1:
             return 0.0
-        se = math.sqrt(
-            p_pool * (1 - p_pool) * (1 / visitors_a + 1 / visitors_b)
-        )
+        se = math.sqrt(p_pool * (1 - p_pool) * (1 / visitors_a + 1 / visitors_b))
         if se == 0:
             return 0.0
         return (p_b - p_a) / se
@@ -332,18 +336,22 @@ class ABTestManager:
 
         for variant in stats["variants"]:
             if variant["is_control"]:
-                results.append({
-                    "variant_name": variant["variant_name"],
-                    "z_score": 0.0,
-                    "p_value": 1.0,
-                    "is_significant": False,
-                    "confidence": 0,
-                })
+                results.append(
+                    {
+                        "variant_name": variant["variant_name"],
+                        "z_score": 0.0,
+                        "p_value": 1.0,
+                        "is_significant": False,
+                        "confidence": 0,
+                    }
+                )
                 continue
 
             z_score = self._calculate_z_score(
-                control["conversions"], control["visitors"],
-                variant["conversions"], variant["visitors"],
+                control["conversions"],
+                control["visitors"],
+                variant["conversions"],
+                variant["visitors"],
             )
             p_value = self._z_score_to_p_value(z_score)
             confidence = round((1 - p_value) * 100, 2)
@@ -352,13 +360,15 @@ class ABTestManager:
             if is_significant:
                 any_significant = True
 
-            results.append({
-                "variant_name": variant["variant_name"],
-                "z_score": round(z_score, 4),
-                "p_value": round(p_value, 6),
-                "is_significant": is_significant,
-                "confidence": confidence,
-            })
+            results.append(
+                {
+                    "variant_name": variant["variant_name"],
+                    "z_score": round(z_score, 4),
+                    "p_value": round(p_value, 6),
+                    "is_significant": is_significant,
+                    "confidence": confidence,
+                }
+            )
 
         return {
             "experiment_id": experiment_id,

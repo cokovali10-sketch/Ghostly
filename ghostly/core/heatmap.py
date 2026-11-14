@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .database import Database
+
 # --- константы вынесены FORGE refactor ---
 CONST_20 = 20
 CONST_30 = 30
@@ -45,9 +46,16 @@ class HeatmapCollector:
                 element_tag, element_id, element_classes)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                site_id, visitor_id, page_url, x, y,
-                viewport_width, viewport_height,
-                element_tag, element_id, element_classes,
+                site_id,
+                visitor_id,
+                page_url,
+                x,
+                y,
+                viewport_width,
+                viewport_height,
+                element_tag,
+                element_id,
+                element_classes,
             ),
         )
         await self.db.db.commit()
@@ -105,10 +113,7 @@ class HeatmapCollector:
             grid[(gx, gy)] += 1
             pages.add(click.get("page_url", ""))
 
-        grid_data = [
-            {"x": gx, "y": gy, "count": count}
-            for (gx, gy), count in grid.items()
-        ]
+        grid_data = [{"x": gx, "y": gy, "count": count} for (gx, gy), count in grid.items()]
 
         return {
             "grid": grid_data,
@@ -147,12 +152,14 @@ class HeatmapCollector:
         for col in range(SECTION_COLS):
             for row in range(SECTION_ROWS):
                 count = sections.get((col, row), 0)
-                section_data.append({
-                    "col": col,
-                    "row": row,
-                    "label": f"{chr(65 + col)}{row + 1}",
-                    "count": count,
-                })
+                section_data.append(
+                    {
+                        "col": col,
+                        "row": row,
+                        "label": f"{chr(65 + col)}{row + 1}",
+                        "count": count,
+                    }
+                )
 
         return {
             "sections": section_data,

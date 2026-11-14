@@ -3,14 +3,14 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import aiosqlite
+
 # --- константы вынесены FORGE refactor ---
 CONST_30 = 30
 CONST_50 = 50
 CONST_1000 = 1000
-
 
 
 DB_PATH = Path(__file__).parent.parent / "ghostly_data.db"
@@ -21,7 +21,7 @@ class Database:
 
     def __init__(self, db_path: str | Path = DB_PATH) -> None:
         self.db_path = Path(db_path)
-        self._db: Optional[aiosqlite.Connection] = None
+        self._db: aiosqlite.Connection | None = None
 
     async def connect(self) -> None:
         self._db = await aiosqlite.connect(str(self.db_path))
@@ -33,7 +33,7 @@ class Database:
         if self._db:
             await self._db.close()
 
-    async def __aenter__(self) -> "Database":
+    async def __aenter__(self) -> Database:
         await self.connect()
         return self
 
@@ -628,9 +628,20 @@ class Database:
                 browser, os, device_type)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                site_id, visitor_id, session_id, url, path, title,
-                referrer, language, screen_size, ip_address, country,
-                browser, os, device_type,
+                site_id,
+                visitor_id,
+                session_id,
+                url,
+                path,
+                title,
+                referrer,
+                language,
+                screen_size,
+                ip_address,
+                country,
+                browser,
+                os,
+                device_type,
             ),
         )
         await self.db.commit()
@@ -693,7 +704,15 @@ class Database:
         )
 
     async def update_user(self, user_id: int, **kwargs: Any) -> bool:
-        allowed = {"email", "password_hash", "role", "is_active", "failed_attempts", "locked_until", "last_login"}
+        allowed = {
+            "email",
+            "password_hash",
+            "role",
+            "is_active",
+            "failed_attempts",
+            "locked_until",
+            "last_login",
+        }
         updates = {k: v for k, v in kwargs.items() if k in allowed}
         if not updates:
             return False
@@ -748,9 +767,7 @@ class Database:
 
     async def cleanup_expired_sessions(self) -> int:
         now = datetime.now(timezone.utc).isoformat()
-        result = await self.db.execute(
-            "DELETE FROM user_sessions WHERE expires_at < ?", (now,)
-        )
+        result = await self.db.execute("DELETE FROM user_sessions WHERE expires_at < ?", (now,))
         await self.db.commit()
         return result.rowcount
 
@@ -874,9 +891,7 @@ class Database:
         )
 
     async def use_password_reset(self, reset_id: int) -> bool:
-        await self.db.execute(
-            "UPDATE password_resets SET used=1 WHERE id=?", (reset_id,)
-        )
+        await self.db.execute("UPDATE password_resets SET used=1 WHERE id=?", (reset_id,))
         await self.db.commit()
         return True
 
@@ -896,10 +911,14 @@ class Database:
 
     async def get_system_stats(self) -> dict[str, Any]:
         users = await self._fetch_one("SELECT COUNT(*) as total FROM users")
-        active_users = await self._fetch_one("SELECT COUNT(*) as total FROM users WHERE is_active=1")
+        active_users = await self._fetch_one(
+            "SELECT COUNT(*) as total FROM users WHERE is_active=1"
+        )
         sites = await self._fetch_one("SELECT COUNT(*) as total FROM sites")
         total_pageviews = await self._fetch_one("SELECT COUNT(*) as total FROM pageviews")
-        api_keys = await self._fetch_one("SELECT COUNT(*) as total FROM user_api_keys WHERE is_active=1")
+        api_keys = await self._fetch_one(
+            "SELECT COUNT(*) as total FROM user_api_keys WHERE is_active=1"
+        )
         sessions = await self._fetch_one("SELECT COUNT(*) as total FROM user_sessions")
         return {
             "total_users": users["total"] if users else 0,
@@ -944,7 +963,9 @@ class Database:
             "bounce_rate": round(bounced_count / total_sessions * 100, 1) if total_sessions else 0,
         }
 
-    async def get_page_stats(self, site_id: int, days: int = CONST_30, limit: int = CONST_50) -> list[dict[str, Any]]:
+    async def get_page_stats(
+        self, site_id: int, days: int = CONST_30, limit: int = CONST_50
+    ) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         return await self._fetch_all(
             """SELECT path, COUNT(*) AS views, COUNT(DISTINCT visitor_id) AS unique_visitors
@@ -972,7 +993,9 @@ class Database:
             "return_rate": round(r / t * 100, 1) if t else 0,
         }
 
-    async def get_referrer_stats(self, site_id: int, days: int = CONST_30, limit: int = CONST_30) -> list[dict[str, Any]]:
+    async def get_referrer_stats(
+        self, site_id: int, days: int = CONST_30, limit: int = CONST_30
+    ) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         return await self._fetch_all(
             """SELECT domain, url, SUM(visits) AS visits
@@ -999,7 +1022,9 @@ class Database:
             (site_id, since),
         )
 
-    async def get_country_stats(self, site_id: int, days: int = CONST_30, limit: int = CONST_50) -> list[dict[str, Any]]:
+    async def get_country_stats(
+        self, site_id: int, days: int = CONST_30, limit: int = CONST_50
+    ) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         return await self._fetch_all(
             """SELECT country, COUNT(*) AS views
@@ -1301,13 +1326,15 @@ class Database:
                 if prev_count > 0:
                     drop_off = round(((prev_count - visitor_count) / prev_count) * 100, 2)
 
-            step_stats.append({
-                "step_order": step["step_order"],
-                "name": step["name"],
-                "visitor_count": visitor_count,
-                "conversion_rate": conversion_rate,
-                "drop_off_rate": drop_off,
-            })
+            step_stats.append(
+                {
+                    "step_order": step["step_order"],
+                    "name": step["name"],
+                    "visitor_count": visitor_count,
+                    "conversion_rate": conversion_rate,
+                    "drop_off_rate": drop_off,
+                }
+            )
 
         overall_conversion = 0
         if first_step_visitors > 0 and step_stats:

@@ -163,7 +163,6 @@ class FunnelManager:
             return {"funnel": funnel, "steps": [], "overall_conversion": 0}
 
         since = datetime.now(timezone.utc).isoformat()
-        site_id = funnel["site_id"]
 
         step_stats = []
         first_step_visitors = 0
@@ -189,13 +188,15 @@ class FunnelManager:
                 if prev_count > 0:
                     drop_off = round(((prev_count - visitor_count) / prev_count) * 100, 2)
 
-            step_stats.append({
-                "step_order": step["step_order"],
-                "name": step["name"],
-                "visitor_count": visitor_count,
-                "conversion_rate": conversion_rate,
-                "drop_off_rate": drop_off,
-            })
+            step_stats.append(
+                {
+                    "step_order": step["step_order"],
+                    "name": step["name"],
+                    "visitor_count": visitor_count,
+                    "conversion_rate": conversion_rate,
+                    "drop_off_rate": drop_off,
+                }
+            )
 
         overall_conversion = 0
         if first_step_visitors > 0 and step_stats:
@@ -260,7 +261,11 @@ class FunnelManager:
         results = []
         for funnel_row in funnels:
             funnel_id = funnel_row["id"]
-            steps = json.loads(funnel_row["steps_config"]) if isinstance(funnel_row["steps_config"], str) else []
+            steps = (
+                json.loads(funnel_row["steps_config"])
+                if isinstance(funnel_row["steps_config"], str)
+                else []
+            )
 
             step_index = await self.check_url_match(url, steps)
             if step_index is not None:

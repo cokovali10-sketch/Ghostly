@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .database import Database
+
 # --- константы вынесены FORGE refactor ---
 CONST_7 = 7
 CONST_12 = 12
@@ -21,9 +22,7 @@ class RetentionAnalyzer:
     def __init__(self, db: Database) -> None:
         self.db = db
 
-    async def get_daily_retention(
-        self, site_id: int, days: int = CONST_30
-    ) -> list[dict[str, Any]]:
+    async def get_daily_retention(self, site_id: int, days: int = CONST_30) -> list[dict[str, Any]]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         visitors = await self.db._fetch_all(
             """SELECT visitor_id, MIN(date(created_at)) AS first_visit,
@@ -51,21 +50,26 @@ class RetentionAnalyzer:
             for day_offset in range(0, (today - cohort_date).days + 1):
                 check_date = (cohort_date + timedelta(days=day_offset)).isoformat()
                 retained = sum(
-                    1 for v in cohort_visitors
+                    1
+                    for v in cohort_visitors
                     if v["last_visit"] >= check_date and v["first_visit"] <= check_date
                 )
                 retention_rate = round(retained / cohort_size * 100, 2) if cohort_size else 0
-                day_retention.append({
-                    "day": day_offset,
-                    "retained": retained,
-                    "retention_rate": retention_rate,
-                })
+                day_retention.append(
+                    {
+                        "day": day_offset,
+                        "retained": retained,
+                        "retention_rate": retention_rate,
+                    }
+                )
 
-            retention_data.append({
-                "cohort_date": cohort_date_str,
-                "cohort_size": cohort_size,
-                "daily_retention": day_retention,
-            })
+            retention_data.append(
+                {
+                    "cohort_date": cohort_date_str,
+                    "cohort_size": cohort_size,
+                    "daily_retention": day_retention,
+                }
+            )
 
         return retention_data
 
@@ -105,22 +109,27 @@ class RetentionAnalyzer:
                 check_week_start = cohort_week + timedelta(weeks=week_offset)
                 check_week_end = check_week_start + timedelta(days=6)
                 retained = sum(
-                    1 for v in cohort_visitors
+                    1
+                    for v in cohort_visitors
                     if v["last_visit"] >= check_week_start.isoformat()
                     and v["first_visit"] <= check_week_end.isoformat()
                 )
                 retention_rate = round(retained / cohort_size * 100, 2) if cohort_size else 0
-                week_retention.append({
-                    "week": week_offset,
-                    "retained": retained,
-                    "retention_rate": retention_rate,
-                })
+                week_retention.append(
+                    {
+                        "week": week_offset,
+                        "retained": retained,
+                        "retention_rate": retention_rate,
+                    }
+                )
 
-            retention_data.append({
-                "cohort_week": cohort_week_str,
-                "cohort_size": cohort_size,
-                "weekly_retention": week_retention,
-            })
+            retention_data.append(
+                {
+                    "cohort_week": cohort_week_str,
+                    "cohort_size": cohort_size,
+                    "weekly_retention": week_retention,
+                }
+            )
 
         return retention_data
 
@@ -161,24 +170,33 @@ class RetentionAnalyzer:
             month_retention = []
             for month_offset in range(0, months_since + 1):
                 m = (cohort_month_date.month + month_offset - 1) % CONST_12 + 1
-                y = cohort_month_date.year + (cohort_month_date.month + month_offset - 1) // CONST_12
+                y = (
+                    cohort_month_date.year
+                    + (cohort_month_date.month + month_offset - 1) // CONST_12
+                )
                 check_month = f"{y:04d}-{m:02d}"
                 retained = sum(
-                    1 for v in cohort_visitors
-                    if v["last_visit"][:CONST_7] >= check_month and v["first_visit"][:CONST_7] <= check_month
+                    1
+                    for v in cohort_visitors
+                    if v["last_visit"][:CONST_7] >= check_month
+                    and v["first_visit"][:CONST_7] <= check_month
                 )
                 retention_rate = round(retained / cohort_size * 100, 2) if cohort_size else 0
-                month_retention.append({
-                    "month": month_offset,
-                    "retained": retained,
-                    "retention_rate": retention_rate,
-                })
+                month_retention.append(
+                    {
+                        "month": month_offset,
+                        "retained": retained,
+                        "retention_rate": retention_rate,
+                    }
+                )
 
-            retention_data.append({
-                "cohort_month": cohort_month_str,
-                "cohort_size": cohort_size,
-                "monthly_retention": month_retention,
-            })
+            retention_data.append(
+                {
+                    "cohort_month": cohort_month_str,
+                    "cohort_size": cohort_size,
+                    "monthly_retention": month_retention,
+                }
+            )
 
         return retention_data
 
@@ -217,13 +235,15 @@ class RetentionAnalyzer:
             avg_visits = round(sum(visit_counts) / cohort_size, 2) if cohort_size else 0
             return_rate = round(returning / cohort_size * 100, 2) if cohort_size else 0
 
-            cohort_stats.append({
-                "cohort": cohort_key,
-                "cohort_size": cohort_size,
-                "returning_visitors": returning,
-                "return_rate": return_rate,
-                "avg_visits_per_visitor": avg_visits,
-            })
+            cohort_stats.append(
+                {
+                    "cohort": cohort_key,
+                    "cohort_size": cohort_size,
+                    "returning_visitors": returning,
+                    "return_rate": return_rate,
+                    "avg_visits_per_visitor": avg_visits,
+                }
+            )
 
         total_visitors = sum(c["cohort_size"] for c in cohort_stats)
         total_returning = sum(c["returning_visitors"] for c in cohort_stats)
@@ -233,7 +253,9 @@ class RetentionAnalyzer:
             "summary": {
                 "total_visitors": total_visitors,
                 "total_returning": total_returning,
-                "overall_return_rate": round(total_returning / total_visitors * 100, 2) if total_visitors else 0,
+                "overall_return_rate": round(total_returning / total_visitors * 100, 2)
+                if total_visitors
+                else 0,
             },
             "group_by": group_by,
         }
@@ -263,8 +285,12 @@ class RetentionAnalyzer:
 
         monthly_churn = []
         for month_offset in range(3):
-            month_start = (datetime.now(timezone.utc) - timedelta(days=CONST_30 * (month_offset + 1))).isoformat()
-            month_end = (datetime.now(timezone.utc) - timedelta(days=CONST_30 * month_offset)).isoformat()
+            month_start = (
+                datetime.now(timezone.utc) - timedelta(days=CONST_30 * (month_offset + 1))
+            ).isoformat()
+            month_end = (
+                datetime.now(timezone.utc) - timedelta(days=CONST_30 * month_offset)
+            ).isoformat()
             month_active = await self.db._fetch_one(
                 """SELECT COUNT(DISTINCT visitor_id) AS count
                    FROM pageviews WHERE site_id=? AND created_at>=? AND created_at<?""",
@@ -278,13 +304,15 @@ class RetentionAnalyzer:
             ma = month_active["count"] if month_active else 0
             mt = month_total["count"] if month_total else 0
             mc = mt - ma
-            monthly_churn.append({
-                "period": f"{month_offset * CONST_30}-{(month_offset + 1) * CONST_30} days ago",
-                "total_visitors": mt,
-                "active_visitors": ma,
-                "churned_visitors": mc,
-                "churn_rate": round(mc / mt * 100, 2) if mt else 0,
-            })
+            monthly_churn.append(
+                {
+                    "period": f"{month_offset * CONST_30}-{(month_offset + 1) * CONST_30} days ago",
+                    "total_visitors": mt,
+                    "active_visitors": ma,
+                    "churned_visitors": mc,
+                    "churn_rate": round(mc / mt * 100, 2) if mt else 0,
+                }
+            )
 
         return {
             "period_days": days,
@@ -296,9 +324,7 @@ class RetentionAnalyzer:
             "monthly_trend": monthly_churn,
         }
 
-    async def get_return_visitor_stats(
-        self, site_id: int, days: int = CONST_30
-    ) -> dict[str, Any]:
+    async def get_return_visitor_stats(self, site_id: int, days: int = CONST_30) -> dict[str, Any]:
         since = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         visitors = await self.db._fetch_all(
             """SELECT visitor_id, COUNT(*) AS total_visits,

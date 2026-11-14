@@ -12,13 +12,14 @@ from aiohttp import web
 
 from ghostly.core.ab_test import ABTestManager
 from ghostly.core.alerts import AlertManager
-from ghostly.core.auth import AuthManager, AuthError
+from ghostly.core.auth import AuthError, AuthManager
 from ghostly.core.database import Database
 from ghostly.core.export import ExportManager
 from ghostly.core.funnels import FunnelManager
 from ghostly.core.geomap import GeoMapCollector
 from ghostly.core.goals import GoalManager
 from ghostly.core.retention import RetentionAnalyzer
+
 # --- константы вынесены FORGE refactor ---
 CONST_5 = 5
 CONST_7 = 7
@@ -119,6 +120,7 @@ def require_auth(handler):
         except AuthError as exc:
             return _error(exc.message, exc.status)
         return await handler(request)
+
     return wrapper
 
 
@@ -137,7 +139,9 @@ def require_role(role: str):
                 return _error("Insufficient permissions", CONST_403)
 
             return await handler(request)
+
         return wrapper
+
     return decorator
 
 
@@ -149,11 +153,13 @@ async def global_health(request: web.Request) -> web.Response:
     db = _get_db(request)
     try:
         await db.db.execute("SELECT 1")
-        return _json_response({
-            "status": "ok",
-            "service": "ghostly",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
+        return _json_response(
+            {
+                "status": "ok",
+                "service": "ghostly",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
     except Exception as exc:
         logger.error("Health check failed: %s", exc)
         return _json_response({"status": "error", "message": str(exc)}, status=CONST_503)
@@ -303,12 +309,14 @@ async def auth_password_reset_request(request: web.Request) -> web.Response:
     if not email:
         return _error("Missing 'email'")
 
-    token = await auth.request_password_reset(email, ip)
+    await auth.request_password_reset(email, ip)
 
-    return _json_response({
-        "ok": True,
-        "message": "If the email exists, a reset link has been sent",
-    })
+    return _json_response(
+        {
+            "ok": True,
+            "message": "If the email exists, a reset link has been sent",
+        }
+    )
 
 
 @routes.post("/api/auth/password/reset")
@@ -571,7 +579,9 @@ async def track(request: web.Request) -> web.Response:
     if not session_id:
         session_id = visitor_id
 
-    ip_address = request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or (request.remote or "")
+    ip_address = request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or (
+        request.remote or ""
+    )
 
     if event_type == "event":
         event_name = body.get("name", "").strip()
@@ -618,7 +628,11 @@ async def track(request: web.Request) -> web.Response:
         except Exception as exc:
             logger.warning("Failed to upsert referrer: %s", exc)
 
-    for table, column in [("devices", "device_type"), ("browsers", "browser"), ("countries", "country")]:
+    for table, column in [
+        ("devices", "device_type"),
+        ("browsers", "browser"),
+        ("countries", "country"),
+    ]:
         value = locals()[column]
         if value:
             try:
@@ -647,7 +661,17 @@ async def track(request: web.Request) -> web.Response:
             await db.db.execute(
                 """INSERT INTO analytics_sessions (id, site_id, visitor_id, started_at, page_count, referrer, browser, os, device_type, country)
                    VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?)""",
-                (session_id, site_id, visitor_id, now_iso, referrer, browser, os, device_type, country),
+                (
+                    session_id,
+                    site_id,
+                    visitor_id,
+                    now_iso,
+                    referrer,
+                    browser,
+                    os,
+                    device_type,
+                    country,
+                ),
             )
 
         existing_visitor = await db._fetch_one(
@@ -663,7 +687,15 @@ async def track(request: web.Request) -> web.Response:
             await db.db.execute(
                 """INSERT INTO visitors (id, site_id, ip_address, user_agent, country, first_seen, last_seen, visits)
                    VALUES (?, ?, ?, ?, ?, ?, ?, 1)""",
-                (visitor_id, site_id, ip_address, request.headers.get("User-Agent", ""), country, now_iso, now_iso),
+                (
+                    visitor_id,
+                    site_id,
+                    ip_address,
+                    request.headers.get("User-Agent", ""),
+                    country,
+                    now_iso,
+                    now_iso,
+                ),
             )
 
         await db.db.commit()
@@ -718,7 +750,13 @@ async def create_site(request: web.Request) -> web.Response:
 
     user = _get_user(request)
     auth = _get_auth(request)
-    await auth.db.log_audit(user["user_id"], "site_create", "site", {"site_id": site_id, "domain": clean_domain}, _get_client_ip(request))
+    await auth.db.log_audit(
+        user["user_id"],
+        "site_create",
+        "site",
+        {"site_id": site_id, "domain": clean_domain},
+        _get_client_ip(request),
+    )
 
     return _json_response(
         {"id": site_id, "domain": clean_domain, "name": name or clean_domain},
@@ -739,7 +777,9 @@ async def delete_site(request: web.Request) -> web.Response:
 
     user = _get_user(request)
     auth = _get_auth(request)
-    await auth.db.log_audit(user["user_id"], "site_delete", "site", {"site_id": site_id}, _get_client_ip(request))
+    await auth.db.log_audit(
+        user["user_id"], "site_delete", "site", {"site_id": site_id}, _get_client_ip(request)
+    )
 
     return _json_response({"ok": True})
 
@@ -761,12 +801,14 @@ async def site_stats(request: web.Request) -> web.Response:
     stats = await db.get_site_stats(site_id, days=days)
     visitor_stats = await db.get_visitor_stats(site_id, days=days)
 
-    return _json_response({
-        "site": dict(site),
-        "period_days": days,
-        **stats,
-        **visitor_stats,
-    })
+    return _json_response(
+        {
+            "site": dict(site),
+            "period_days": days,
+            **stats,
+            **visitor_stats,
+        }
+    )
 
 
 @routes.get("/api/sites/{id}/pages")
@@ -908,11 +950,13 @@ async def site_realtime(request: web.Request) -> web.Response:
         (site_id, five_min_ago),
     )
 
-    return _json_response({
-        "active_visitors": active["active_visitors"] if active else 0,
-        "page_views_5m": page_views_5m["views"] if page_views_5m else 0,
-        "top_pages": top_pages,
-    })
+    return _json_response(
+        {
+            "active_visitors": active["active_visitors"] if active else 0,
+            "page_views_5m": page_views_5m["views"] if page_views_5m else 0,
+            "top_pages": top_pages,
+        }
+    )
 
 
 @routes.get("/api/sites/{id}/retention")
@@ -1406,6 +1450,7 @@ async def site_dashboard(request: web.Request) -> web.Response:
         return _error("Site not found", status=CONST_404)
 
     from ghostly.core.aggregator import Aggregator
+
     aggregator = Aggregator(db)
     dashboard = await aggregator.get_dashboard(site_id, days)
 
@@ -1422,13 +1467,15 @@ async def site_dashboard(request: web.Request) -> web.Response:
         except ValueError:
             continue
 
-    return _json_response({
-        "site": dict(site),
-        "period_days": days,
-        "dashboard": dashboard,
-        "goals": goals,
-        "funnels": funnels,
-    })
+    return _json_response(
+        {
+            "site": dict(site),
+            "period_days": days,
+            "dashboard": dashboard,
+            "goals": goals,
+            "funnels": funnels,
+        }
+    )
 
 
 # ── Webhooks ────────────────────────────────────────────────────────────
@@ -1501,6 +1548,7 @@ async def delete_webhook(request: web.Request) -> web.Response:
 @require_role("editor")
 async def get_email_config(request: web.Request) -> web.Response:
     from ghostly.core.email import EmailReporter
+
     db = _get_db(request)
     reporter = EmailReporter(db)
     await reporter.load_config()
@@ -1511,6 +1559,7 @@ async def get_email_config(request: web.Request) -> web.Response:
 @require_role("editor")
 async def save_email_config(request: web.Request) -> web.Response:
     from ghostly.core.email import EmailReporter
+
     db = _get_db(request)
     try:
         body = await request.json()
@@ -1531,6 +1580,7 @@ async def save_email_config(request: web.Request) -> web.Response:
 @require_role("editor")
 async def send_test_email(request: web.Request) -> web.Response:
     from ghostly.core.email import EmailReporter
+
     db = _get_db(request)
     try:
         body = await request.json()
@@ -1554,6 +1604,7 @@ async def send_test_email(request: web.Request) -> web.Response:
 @require_auth
 async def list_email_schedules(request: web.Request) -> web.Response:
     from ghostly.core.email import EmailReporter
+
     site_id = int(request.match_info["id"])
     db = _get_db(request)
 
@@ -1571,6 +1622,7 @@ async def list_email_schedules(request: web.Request) -> web.Response:
 @require_role("editor")
 async def create_email_schedule(request: web.Request) -> web.Response:
     from ghostly.core.email import EmailReporter
+
     site_id = int(request.match_info["id"])
     db = _get_db(request)
 
@@ -1603,6 +1655,7 @@ async def create_email_schedule(request: web.Request) -> web.Response:
 @require_role("editor")
 async def delete_email_schedule(request: web.Request) -> web.Response:
     from ghostly.core.email import EmailReporter
+
     schedule_id = int(request.match_info["id"])
     db = _get_db(request)
     reporter = EmailReporter(db)
@@ -1616,6 +1669,7 @@ async def delete_email_schedule(request: web.Request) -> web.Response:
 @require_role("editor")
 async def send_report_now(request: web.Request) -> web.Response:
     from ghostly.core.email import EmailReporter
+
     site_id = int(request.match_info["id"])
     db = _get_db(request)
 
@@ -1647,6 +1701,7 @@ async def send_report_now(request: web.Request) -> web.Response:
 @require_auth
 async def webhook_history(request: web.Request) -> web.Response:
     from ghostly.core.webhooks import WebhookManager
+
     site_id = int(request.match_info["id"])
     db = _get_db(request)
 
@@ -1663,6 +1718,7 @@ async def webhook_history(request: web.Request) -> web.Response:
 @require_role("editor")
 async def test_webhook(request: web.Request) -> web.Response:
     from ghostly.core.webhooks import WebhookManager
+
     webhook_id = int(request.match_info["id"])
     db = _get_db(request)
     mgr = WebhookManager(db)
@@ -1681,6 +1737,7 @@ async def test_webhook(request: web.Request) -> web.Response:
 @routes.post("/api/sites/{id}/heatmap/click")
 async def record_heatmap_click(request: web.Request) -> web.Response:
     from ghostly.core.heatmap import HeatmapCollector
+
     site_id = int(request.match_info["id"])
     db = _get_db(request)
 
@@ -1718,6 +1775,7 @@ async def record_heatmap_click(request: web.Request) -> web.Response:
 @require_auth
 async def heatmap_grid(request: web.Request) -> web.Response:
     from ghostly.core.heatmap import HeatmapCollector
+
     site_id = int(request.match_info["id"])
     db = _get_db(request)
 
@@ -1737,6 +1795,7 @@ async def heatmap_grid(request: web.Request) -> web.Response:
 @require_auth
 async def heatmap_sections(request: web.Request) -> web.Response:
     from ghostly.core.heatmap import HeatmapCollector
+
     site_id = int(request.match_info["id"])
     db = _get_db(request)
 
@@ -1756,6 +1815,7 @@ async def heatmap_sections(request: web.Request) -> web.Response:
 @require_auth
 async def heatmap_elements(request: web.Request) -> web.Response:
     from ghostly.core.heatmap import HeatmapCollector
+
     site_id = int(request.match_info["id"])
     db = _get_db(request)
 
@@ -1775,6 +1835,7 @@ async def heatmap_elements(request: web.Request) -> web.Response:
 @require_auth
 async def heatmap_pages(request: web.Request) -> web.Response:
     from ghostly.core.heatmap import HeatmapCollector
+
     site_id = int(request.match_info["id"])
     db = _get_db(request)
 
@@ -1793,6 +1854,7 @@ async def heatmap_pages(request: web.Request) -> web.Response:
 @require_auth
 async def heatmap_clicks(request: web.Request) -> web.Response:
     from ghostly.core.heatmap import HeatmapCollector
+
     site_id = int(request.match_info["id"])
     db = _get_db(request)
 
@@ -1815,6 +1877,7 @@ async def heatmap_clicks(request: web.Request) -> web.Response:
 @require_auth
 async def list_themes(request: web.Request) -> web.Response:
     from ghostly.core.themes import ThemeManager
+
     db = _get_db(request)
     mgr = ThemeManager(db)
     themes = await mgr.get_themes()
@@ -1825,6 +1888,7 @@ async def list_themes(request: web.Request) -> web.Response:
 @require_auth
 async def get_theme(request: web.Request) -> web.Response:
     from ghostly.core.themes import ThemeManager
+
     theme_id = request.match_info["id"]
     db = _get_db(request)
     mgr = ThemeManager(db)
@@ -1838,6 +1902,7 @@ async def get_theme(request: web.Request) -> web.Response:
 @require_role("editor")
 async def create_theme(request: web.Request) -> web.Response:
     from ghostly.core.themes import ThemeManager
+
     db = _get_db(request)
     try:
         body = await request.json()
@@ -1863,6 +1928,7 @@ async def create_theme(request: web.Request) -> web.Response:
 @require_role("editor")
 async def delete_theme(request: web.Request) -> web.Response:
     from ghostly.core.themes import ThemeManager
+
     theme_id = request.match_info["id"]
     db = _get_db(request)
     mgr = ThemeManager(db)
@@ -1879,6 +1945,7 @@ async def delete_theme(request: web.Request) -> web.Response:
 @require_auth
 async def get_theme_css(request: web.Request) -> web.Response:
     from ghostly.core.themes import ThemeManager
+
     theme_id = request.match_info["id"]
     db = _get_db(request)
     mgr = ThemeManager(db)
@@ -1890,6 +1957,7 @@ async def get_theme_css(request: web.Request) -> web.Response:
 @require_auth
 async def get_user_theme(request: web.Request) -> web.Response:
     from ghostly.core.themes import ThemeManager
+
     user_id = request.match_info["id"]
     db = _get_db(request)
     mgr = ThemeManager(db)
@@ -1901,6 +1969,7 @@ async def get_user_theme(request: web.Request) -> web.Response:
 @require_auth
 async def set_user_theme(request: web.Request) -> web.Response:
     from ghostly.core.themes import ThemeManager
+
     user_id = request.match_info["id"]
     db = _get_db(request)
     try:
@@ -1928,6 +1997,7 @@ async def set_user_theme(request: web.Request) -> web.Response:
 @require_auth
 async def list_plugins(request: web.Request) -> web.Response:
     from ghostly.core.plugins import PluginManager
+
     db = _get_db(request)
     mgr = PluginManager(db)
     plugins = mgr.list_plugins()
@@ -1939,6 +2009,7 @@ async def list_plugins(request: web.Request) -> web.Response:
 @require_role("admin")
 async def reload_plugins(request: web.Request) -> web.Response:
     from ghostly.core.plugins import PluginManager
+
     db = _get_db(request)
     mgr = PluginManager(db)
     await mgr.unload_all()
@@ -1950,6 +2021,7 @@ async def reload_plugins(request: web.Request) -> web.Response:
 @require_auth
 async def get_plugin(request: web.Request) -> web.Response:
     from ghostly.core.plugins import PluginManager
+
     name = request.match_info["name"]
     db = _get_db(request)
     mgr = PluginManager(db)
@@ -1966,6 +2038,7 @@ async def get_plugin(request: web.Request) -> web.Response:
 @require_auth
 async def list_backups(request: web.Request) -> web.Response:
     from ghostly.core.backup import BackupManager
+
     db = _get_db(request)
     mgr = BackupManager(db)
     backups = await mgr.list_backups()
@@ -1976,6 +2049,7 @@ async def list_backups(request: web.Request) -> web.Response:
 @require_role("admin")
 async def create_backup(request: web.Request) -> web.Response:
     from ghostly.core.backup import BackupManager
+
     db = _get_db(request)
     try:
         body = await request.json()
@@ -1994,6 +2068,7 @@ async def create_backup(request: web.Request) -> web.Response:
 @require_role("admin")
 async def restore_backup(request: web.Request) -> web.Response:
     from ghostly.core.backup import BackupManager
+
     db = _get_db(request)
     try:
         body = await request.json()
@@ -2017,6 +2092,7 @@ async def restore_backup(request: web.Request) -> web.Response:
 @require_role("admin")
 async def delete_backup(request: web.Request) -> web.Response:
     from ghostly.core.backup import BackupManager
+
     filename = request.match_info["filename"]
     db = _get_db(request)
     mgr = BackupManager(db)
@@ -2030,6 +2106,7 @@ async def delete_backup(request: web.Request) -> web.Response:
 @require_role("admin")
 async def prune_backups(request: web.Request) -> web.Response:
     from ghostly.core.backup import BackupManager
+
     db = _get_db(request)
     try:
         body = await request.json()
@@ -2536,6 +2613,7 @@ async def experiments_summary(request: web.Request) -> web.Response:
 
 def _get_tenant(request: web.Request):
     from ghostly.core.multi_tenant import TenantManager
+
     db = _get_db(request)
     return TenantManager(db)
 
@@ -2838,7 +2916,8 @@ async def upgrade_org_plan(request: web.Request) -> web.Response:
 @routes.get("/api/plans")
 @require_auth
 async def list_plans(request: web.Request) -> web.Response:
-    from ghostly.core.multi_tenant import TenantManager, PLAN_LIMITS, PLAN_PRICING
+    from ghostly.core.multi_tenant import PLAN_LIMITS, PLAN_PRICING
+
     tenant = _get_tenant(request)
     plans = {}
     for plan_name in PLAN_LIMITS:
@@ -2869,6 +2948,7 @@ async def org_invoices(request: web.Request) -> web.Response:
 
 def _get_search(request: web.Request):
     from ghostly.core.search import SearchEngine
+
     db = _get_db(request)
     return SearchEngine(db)
 
@@ -2998,6 +3078,7 @@ async def search_history(request: web.Request) -> web.Response:
 
 def _get_scheduler(request: web.Request):
     from ghostly.core.scheduler import TaskScheduler
+
     db = _get_db(request)
     return TaskScheduler(db)
 
@@ -3143,6 +3224,7 @@ async def get_job_logs(request: web.Request) -> web.Response:
 
 def _get_realtime(request: web.Request):
     from ghostly.core.realtime import RealtimeManager
+
     db = _get_db(request)
     return RealtimeManager(db)
 

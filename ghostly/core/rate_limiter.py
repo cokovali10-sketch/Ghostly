@@ -4,10 +4,10 @@ import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import Any
+
 # --- константы вынесены FORGE refactor ---
 CONST_60 = 60.0
 CONST_3600 = 3600.0
-
 
 
 @dataclass
@@ -107,7 +107,6 @@ class RateLimiter:
         window: str = "1m",
     ) -> dict[str, Any]:
         key = f"{scope}:{identifier}"
-        window_seconds = self.WINDOW_SECONDS.get(window, CONST_60)
 
         if window == "1s":
             capacity = self._burst_size
@@ -171,10 +170,7 @@ class RateLimiter:
     async def cleanup_expired(self, max_age: float = 7200.0) -> int:
         async with self._lock:
             now = time.monotonic()
-            expired_buckets = [
-                k for k, v in self._buckets.items()
-                if now - v.last_refill > max_age
-            ]
+            expired_buckets = [k for k, v in self._buckets.items() if now - v.last_refill > max_age]
             for k in expired_buckets:
                 del self._buckets[k]
             return len(expired_buckets)

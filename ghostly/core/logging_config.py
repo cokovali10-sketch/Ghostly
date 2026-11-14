@@ -8,9 +8,9 @@ import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
 # --- константы вынесены FORGE refactor ---
 CONST_1024 = 1024
-
 
 
 class JSONFormatter(logging.Formatter):
@@ -148,17 +148,13 @@ class RequestLogger:
             },
         }
         if status >= 500:
-            self._logger.error(
-                "%s %s %d (%.1fms)", method, path, status, duration_ms, extra=extra
-            )
+            self._logger.error("%s %s %d (%.1fms)", method, path, status, duration_ms, extra=extra)
         elif status >= 400:
             self._logger.warning(
                 "%s %s %d (%.1fms)", method, path, status, duration_ms, extra=extra
             )
         else:
-            self._logger.info(
-                "%s %s %d (%.1fms)", method, path, status, duration_ms, extra=extra
-            )
+            self._logger.info("%s %s %d (%.1fms)", method, path, status, duration_ms, extra=extra)
 
     def log_error(
         self,
@@ -174,9 +170,7 @@ class RequestLogger:
                 "traceback": traceback_str,
             }
         }
-        self._logger.error(
-            "%s %s error: %s", method, path, error, extra=extra
-        )
+        self._logger.error("%s %s error: %s", method, path, error, extra=extra)
 
 
 class PerformanceTimer:
@@ -194,9 +188,7 @@ class PerformanceTimer:
 
     def __exit__(self, *args: Any) -> None:
         self._duration = (time.monotonic() - self._start) * 1000
-        self._logger.debug(
-            "%s completed in %.2fms", self._operation, self._duration
-        )
+        self._logger.debug("%s completed in %.2fms", self._operation, self._duration)
 
     @property
     def duration_ms(self) -> float:

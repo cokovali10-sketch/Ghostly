@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .database import Database
+
 # --- константы вынесены FORGE refactor ---
 CONST_30 = 30
 
@@ -140,7 +141,9 @@ class GoalManager:
 
         logger.info(
             "Goal %d completed by visitor %s (completion %d)",
-            goal_id, visitor_id[:16], completion_id,
+            goal_id,
+            visitor_id[:16],
+            completion_id,
         )
 
         return {

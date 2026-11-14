@@ -12,6 +12,7 @@ import bcrypt
 import jwt
 
 from .database import Database
+
 # --- константы вынесены FORGE refactor ---
 CONST_16 = 16
 CONST_32 = 32
@@ -117,7 +118,9 @@ class AuthManager:
             raise AuthError(strength_error, CONST_400)
 
         if role not in ROLES_HIERARCHY:
-            raise AuthError(f"Invalid role. Must be one of: {', '.join(ROLES_HIERARCHY.keys())}", CONST_400)
+            raise AuthError(
+                f"Invalid role. Must be one of: {', '.join(ROLES_HIERARCHY.keys())}", CONST_400
+            )
 
         existing = await self.db.get_user_by_email(email)
         if existing:
@@ -155,11 +158,15 @@ class AuthManager:
         user = await self.db.get_user_by_email(email)
 
         if not user:
-            await self.db.log_audit(None, "login_failed", "user", {"email": email, "reason": "not_found"}, ip)
+            await self.db.log_audit(
+                None, "login_failed", "user", {"email": email, "reason": "not_found"}, ip
+            )
             raise AuthError("Invalid email or password", CONST_401)
 
         if not user["is_active"]:
-            await self.db.log_audit(user["id"], "login_blocked", "user", {"reason": "account_disabled"}, ip)
+            await self.db.log_audit(
+                user["id"], "login_blocked", "user", {"reason": "account_disabled"}, ip
+            )
             raise AuthError("Account is disabled", CONST_403)
 
         if user["locked_until"]:
@@ -177,14 +184,27 @@ class AuthManager:
             failed_attempts = user["failed_attempts"] + 1
             update: dict[str, Any] = {"failed_attempts": failed_attempts}
             if failed_attempts >= MAX_FAILED_ATTEMPTS:
-                lockout_until = datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_DURATION_MINUTES)
+                lockout_until = datetime.now(timezone.utc) + timedelta(
+                    minutes=LOCKOUT_DURATION_MINUTES
+                )
                 update["locked_until"] = lockout_until.isoformat()
                 logger.warning("Account locked due to failed attempts: %s", email)
             await self.db.update_user(user["id"], **update)
-            await self.db.log_audit(user["id"], "login_failed", "user", {"reason": "bad_password", "attempts": failed_attempts}, ip)
+            await self.db.log_audit(
+                user["id"],
+                "login_failed",
+                "user",
+                {"reason": "bad_password", "attempts": failed_attempts},
+                ip,
+            )
             raise AuthError("Invalid email or password", CONST_401)
 
-        await self.db.update_user(user["id"], failed_attempts=0, locked_until=None, last_login=datetime.now(timezone.utc).isoformat())
+        await self.db.update_user(
+            user["id"],
+            failed_attempts=0,
+            locked_until=None,
+            last_login=datetime.now(timezone.utc).isoformat(),
+        )
 
         access_token = self.generate_token(user["id"], "access", user["role"])
         refresh_token = self.generate_token(user["id"], "refresh", user["role"])
@@ -378,7 +398,9 @@ class AuthManager:
             expires_at=expires_at,
         )
 
-        await self.db.log_audit(user_id, "api_key_create", "api_key", {"name": name, "id": key_id}, ip)
+        await self.db.log_audit(
+            user_id, "api_key_create", "api_key", {"name": name, "id": key_id}, ip
+        )
 
         logger.info("Created API key '%s' for user %d", name, user_id)
 
@@ -432,10 +454,20 @@ class AuthManager:
         current_count = len(self._request_counts[key_id])
 
         if current_count >= rate_limit:
-            reset_at = int(self._request_counts[key_id][0] + self._rate_limit_window) if self._request_counts[key_id] else int(now + self._rate_limit_window)
-            return {"allowed": False, "remaining": 0, "reset_at": reset_at, "error": "Rate limit exceeded"}
+            reset_at = (
+                int(self._request_counts[key_id][0] + self._rate_limit_window)
+                if self._request_counts[key_id]
+                else int(now + self._rate_limit_window)
+            )
+            return {
+                "allowed": False,
+                "remaining": 0,
+                "reset_at": reset_at,
+                "error": "Rate limit exceeded",
+            }
 
         self._request_counts[key_id].append(now)
+        key_hash = hashlib.sha256(api_key.encode()).hexdigest()
         await self.db.update_user_api_key_last_used(key_hash)
 
         return {
@@ -464,7 +496,9 @@ class AuthManager:
     async def list_users(self) -> list[dict[str, Any]]:
         return await self.db.get_all_users()
 
-    async def update_user_role(self, admin_id: int, target_user_id: int, new_role: str, ip: str = "") -> bool:
+    async def update_user_role(
+        self, admin_id: int, target_user_id: int, new_role: str, ip: str = ""
+    ) -> bool:
         if new_role not in ROLES_HIERARCHY:
             raise AuthError(f"Invalid role: {new_role}", CONST_400)
 
@@ -473,7 +507,13 @@ class AuthManager:
             raise AuthError("User not found", CONST_404)
 
         await self.db.update_user(target_user_id, role=new_role)
-        await self.db.log_audit(admin_id, "role_change", "user", {"target_user_id": target_user_id, "new_role": new_role}, ip)
+        await self.db.log_audit(
+            admin_id,
+            "role_change",
+            "user",
+            {"target_user_id": target_user_id, "new_role": new_role},
+            ip,
+        )
 
         logger.info("User %d role changed to %s by admin %d", target_user_id, new_role, admin_id)
         return True
@@ -484,13 +524,17 @@ class AuthManager:
             raise AuthError("User not found", CONST_404)
 
         if target["role"] == "admin":
-            admin_count = await self.db._fetch_one("SELECT COUNT(*) as c FROM users WHERE role='admin' AND is_active=1")
+            admin_count = await self.db._fetch_one(
+                "SELECT COUNT(*) as c FROM users WHERE role='admin' AND is_active=1"
+            )
             if admin_count and admin_count["c"] <= 1:
                 raise AuthError("Cannot deactivate the last admin", CONST_400)
 
         await self.db.update_user(target_user_id, is_active=0)
         await self.db.delete_user_sessions(target_user_id)
-        await self.db.log_audit(admin_id, "user_deactivate", "user", {"target_user_id": target_user_id}, ip)
+        await self.db.log_audit(
+            admin_id, "user_deactivate", "user", {"target_user_id": target_user_id}, ip
+        )
 
         logger.info("User %d deactivated by admin %d", target_user_id, admin_id)
         return True
@@ -501,7 +545,9 @@ class AuthManager:
             raise AuthError("User not found", CONST_404)
 
         await self.db.update_user(target_user_id, is_active=1)
-        await self.db.log_audit(admin_id, "user_activate", "user", {"target_user_id": target_user_id}, ip)
+        await self.db.log_audit(
+            admin_id, "user_activate", "user", {"target_user_id": target_user_id}, ip
+        )
 
         logger.info("User %d activated by admin %d", target_user_id, admin_id)
         return True
@@ -512,12 +558,20 @@ class AuthManager:
             raise AuthError("User not found", CONST_404)
 
         if target["role"] == "admin":
-            admin_count = await self.db._fetch_one("SELECT COUNT(*) as c FROM users WHERE role='admin' AND is_active=1")
+            admin_count = await self.db._fetch_one(
+                "SELECT COUNT(*) as c FROM users WHERE role='admin' AND is_active=1"
+            )
             if admin_count and admin_count["c"] <= 1:
                 raise AuthError("Cannot delete the last admin", CONST_400)
 
         await self.db.delete_user(target_user_id)
-        await self.db.log_audit(admin_id, "user_delete", "user", {"target_user_id": target_user_id, "email": target["email"]}, ip)
+        await self.db.log_audit(
+            admin_id,
+            "user_delete",
+            "user",
+            {"target_user_id": target_user_id, "email": target["email"]},
+            ip,
+        )
 
         logger.info("User %d deleted by admin %d", target_user_id, admin_id)
         return True

@@ -4,8 +4,9 @@ import asyncio
 import fnmatch
 import time
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Awaitable
+from typing import Any
 
 
 @dataclass
@@ -71,10 +72,7 @@ class LRUCache:
 
     async def invalidate_pattern(self, pattern: str) -> int:
         async with self._lock:
-            keys_to_remove = [
-                k for k in self._store
-                if fnmatch.fnmatch(k, pattern)
-            ]
+            keys_to_remove = [k for k in self._store if fnmatch.fnmatch(k, pattern)]
             for k in keys_to_remove:
                 del self._store[k]
             self._stats.size = len(self._store)

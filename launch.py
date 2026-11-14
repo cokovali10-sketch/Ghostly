@@ -12,8 +12,8 @@ Just double-click this file to launch Ghostly!
 import os
 import signal
 import sys
-import webbrowser
 import time
+import webbrowser
 from pathlib import Path
 
 BANNER = r"""
@@ -44,11 +44,13 @@ def get_db_path() -> str:
 
 def open_browser(host: str, port: int, delay: float = 2.0) -> None:
     """Open the browser after a short delay."""
+
     def _open():
         time.sleep(delay)
         webbrowser.open(f"http://{host}:{port}")
-    
+
     import threading
+
     thread = threading.Thread(target=_open, daemon=True)
     thread.start()
 
@@ -69,11 +71,15 @@ def main() -> None:
 
     try:
         from ghostly.__main__ import main as ghostly_main
+
         sys.argv = [
             "ghostly",
-            "--port", str(port),
-            "--host", host,
-            "--db", db_path,
+            "--port",
+            str(port),
+            "--host",
+            host,
+            "--db",
+            db_path,
             "--no-browser",
         ]
         ghostly_main()

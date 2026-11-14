@@ -4,9 +4,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .database import Database
+
 # --- константы вынесены FORGE refactor ---
 CONST_7 = 7
-
 
 
 class Aggregator:

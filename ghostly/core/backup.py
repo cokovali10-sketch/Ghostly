@@ -42,9 +42,8 @@ class BackupManager:
 
         if compress:
             dest = self._backup_dir / f"{name}.db.gz"
-            with open(db_path, "rb") as f_in:
-                with gzip.open(dest, "wb") as f_out:
-                    shutil.copyfileobj(f_in, f_out)
+            with open(db_path, "rb") as f_in, gzip.open(dest, "wb") as f_out:
+                shutil.copyfileobj(f_in, f_out)
         else:
             dest = self._backup_dir / f"{name}.db"
             shutil.copy2(str(db_path), str(dest))
@@ -130,9 +129,7 @@ class BackupManager:
         return deleted_file or result.rowcount > 0
 
     async def prune_old_backups(self, keep_count: int = 10) -> int:
-        rows = await self.db._fetch_all(
-            "SELECT id, filename FROM backups ORDER BY created_at DESC"
-        )
+        rows = await self.db._fetch_all("SELECT id, filename FROM backups ORDER BY created_at DESC")
 
         if len(rows) <= keep_count:
             return 0

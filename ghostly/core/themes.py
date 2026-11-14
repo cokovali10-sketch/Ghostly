@@ -148,8 +148,12 @@ class ThemeManager:
             raise ValueError(f"Cannot overwrite built-in theme '{theme_id}'")
 
         required = [
-            "--bg-primary", "--bg-secondary", "--text-primary",
-            "--text-secondary", "--accent", "--border",
+            "--bg-primary",
+            "--bg-secondary",
+            "--text-primary",
+            "--text-secondary",
+            "--accent",
+            "--border",
         ]
         missing = [k for k in required if k not in variables]
         if missing:

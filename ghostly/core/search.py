@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ghostly.core.database import Database
+
 # --- константы вынесены FORGE refactor ---
 CONST_30 = 30
 CONST_50 = 50
@@ -35,11 +36,15 @@ class SearchEngine:
         results.extend(page_results)
         total += page_total
 
-        event_results, event_total = await self._search_events(site_id, query, filters, limit, offset)
+        event_results, event_total = await self._search_events(
+            site_id, query, filters, limit, offset
+        )
         results.extend(event_results)
         total += event_total
 
-        visitor_results, visitor_total = await self._search_visitors(site_id, query, filters, limit, offset)
+        visitor_results, visitor_total = await self._search_visitors(
+            site_id, query, filters, limit, offset
+        )
         results.extend(visitor_results)
         total += visitor_total
 
@@ -107,17 +112,19 @@ class SearchEngine:
         results = []
         for row in rows:
             relevance = self._calculate_relevance(query, row.get("path", ""), row.get("title", ""))
-            results.append({
-                "type": "page",
-                "path": row["path"],
-                "title": row.get("title", ""),
-                "url": row.get("url", ""),
-                "views": row["views"],
-                "unique_visitors": row["unique_visitors"],
-                "first_seen": row["first_seen"],
-                "last_seen": row["last_seen"],
-                "relevance": relevance,
-            })
+            results.append(
+                {
+                    "type": "page",
+                    "path": row["path"],
+                    "title": row.get("title", ""),
+                    "url": row.get("url", ""),
+                    "views": row["views"],
+                    "unique_visitors": row["unique_visitors"],
+                    "first_seen": row["first_seen"],
+                    "last_seen": row["last_seen"],
+                    "relevance": relevance,
+                }
+            )
 
         return results, total
 
@@ -158,16 +165,18 @@ class SearchEngine:
         results = []
         for row in rows:
             relevance = self._calculate_relevance(query, row.get("name", ""), row.get("url", ""))
-            results.append({
-                "type": "event",
-                "id": row["id"],
-                "name": row["name"],
-                "url": row.get("url", ""),
-                "meta": json.loads(row.get("meta") or "{}"),
-                "visitor_id": row.get("visitor_id", ""),
-                "created_at": row["created_at"],
-                "relevance": relevance,
-            })
+            results.append(
+                {
+                    "type": "event",
+                    "id": row["id"],
+                    "name": row["name"],
+                    "url": row.get("url", ""),
+                    "meta": json.loads(row.get("meta") or "{}"),
+                    "visitor_id": row.get("visitor_id", ""),
+                    "created_at": row["created_at"],
+                    "relevance": relevance,
+                }
+            )
 
         return results, total
 
@@ -205,15 +214,17 @@ class SearchEngine:
         results = []
         for row in rows:
             relevance = self._calculate_relevance(query, row.get("id", ""), row.get("country", ""))
-            results.append({
-                "type": "visitor",
-                "visitor_id": row["id"],
-                "country": row.get("country", ""),
-                "visits": row["visits"],
-                "first_seen": row["first_seen"],
-                "last_seen": row["last_seen"],
-                "relevance": relevance,
-            })
+            results.append(
+                {
+                    "type": "visitor",
+                    "visitor_id": row["id"],
+                    "country": row.get("country", ""),
+                    "visits": row["visits"],
+                    "first_seen": row["first_seen"],
+                    "last_seen": row["last_seen"],
+                    "relevance": relevance,
+                }
+            )
 
         return results, total
 
@@ -238,11 +249,13 @@ class SearchEngine:
             text = page.get("path", "")
             if text and text not in seen:
                 seen.add(text)
-                suggestions.append({
-                    "text": text,
-                    "label": page.get("title", "") or text,
-                    "type": "page",
-                })
+                suggestions.append(
+                    {
+                        "text": text,
+                        "label": page.get("title", "") or text,
+                        "type": "page",
+                    }
+                )
 
         event_names = await self.db._fetch_all(
             """SELECT DISTINCT name
@@ -254,11 +267,13 @@ class SearchEngine:
             name = ev.get("name", "")
             if name and name not in seen:
                 seen.add(name)
-                suggestions.append({
-                    "text": name,
-                    "label": name,
-                    "type": "event",
-                })
+                suggestions.append(
+                    {
+                        "text": name,
+                        "label": name,
+                        "type": "event",
+                    }
+                )
 
         countries = await self.db._fetch_all(
             """SELECT DISTINCT country
@@ -270,17 +285,17 @@ class SearchEngine:
             country = c.get("country", "")
             if country and country not in seen:
                 seen.add(country)
-                suggestions.append({
-                    "text": country,
-                    "label": country,
-                    "type": "country",
-                })
+                suggestions.append(
+                    {
+                        "text": country,
+                        "label": country,
+                        "type": "country",
+                    }
+                )
 
         return suggestions[:limit]
 
-    async def get_search_suggestions(
-        self, site_id: int, query: str, limit: int = 5
-    ) -> list[str]:
+    async def get_search_suggestions(self, site_id: int, query: str, limit: int = 5) -> list[str]:
         if not query.strip():
             return []
 
@@ -303,9 +318,7 @@ class SearchEngine:
             (site_id, since, limit),
         )
 
-    async def get_search_history(
-        self, user_id: int, limit: int = 20
-    ) -> list[dict[str, Any]]:
+    async def get_search_history(self, user_id: int, limit: int = 20) -> list[dict[str, Any]]:
         return await self.db._fetch_all(
             """SELECT id, query, site_id, results_count, created_at
                FROM search_history WHERE user_id=?
@@ -313,9 +326,7 @@ class SearchEngine:
             (user_id, limit),
         )
 
-    async def _log_search(
-        self, user_id: int, site_id: int, query: str, results_count: int
-    ) -> None:
+    async def _log_search(self, user_id: int, site_id: int, query: str, results_count: int) -> None:
         try:
             await self.db.db.execute(
                 """INSERT INTO search_history (user_id, site_id, query, results_count, created_at)
@@ -373,13 +384,17 @@ class SearchEngine:
         if referrer:
             filtered = [r for r in filtered if r.get("type") != "page" or True]
         if event_name:
-            filtered = [r for r in filtered if r.get("type") != "event" or r.get("name") == event_name]
+            filtered = [
+                r for r in filtered if r.get("type") != "event" or r.get("name") == event_name
+            ]
         if min_views is not None:
             filtered = [r for r in filtered if r.get("views", 0) >= min_views]
 
         reverse = sort_order == "desc"
         if sort_by == "date":
-            filtered.sort(key=lambda x: x.get("last_seen") or x.get("created_at") or "", reverse=reverse)
+            filtered.sort(
+                key=lambda x: x.get("last_seen") or x.get("created_at") or "", reverse=reverse
+            )
         elif sort_by == "views":
             filtered.sort(key=lambda x: x.get("views", 0), reverse=reverse)
         elif sort_by == "relevance":

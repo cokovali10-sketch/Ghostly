@@ -10,6 +10,7 @@ from email.mime.text import MIMEText
 from typing import Any
 
 from .database import Database
+
 # --- константы вынесены FORGE refactor ---
 CONST_7 = 7
 CONST_15 = 15
@@ -90,9 +91,9 @@ class EmailReporter:
             top_pages_rows += f"""
             <tr>
               <td style="padding:8px 12px;border-bottom:1px solid #eee;">{i}</td>
-              <td style="padding:8px 12px;border-bottom:1px solid #eee;">{p.get('path', '/')}</td>
-              <td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right;">{p.get('views', 0)}</td>
-              <td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right;">{p.get('unique_visitors', 0)}</td>
+              <td style="padding:8px 12px;border-bottom:1px solid #eee;">{p.get("path", "/")}</td>
+              <td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right;">{p.get("views", 0)}</td>
+              <td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right;">{p.get("unique_visitors", 0)}</td>
             </tr>"""
 
         chart_points = ""
@@ -100,7 +101,7 @@ class EmailReporter:
         bar_width = max(1, 600 // max(len(daily), 1))
         for d in daily:
             h = int((d.get("views", 0) / max_views) * 100)
-            chart_points += f'<div style="display:inline-block;width:{bar_width}px;height:{h}px;background:#6366f1;margin:0 1px;vertical-align:bottom;border-radius:2px 2px 0 0;" title="{d.get("day","")}: {d.get("views",0)}"></div>'
+            chart_points += f'<div style="display:inline-block;width:{bar_width}px;height:{h}px;background:#6366f1;margin:0 1px;vertical-align:bottom;border-radius:2px 2px 0 0;" title="{d.get("day", "")}: {d.get("views", 0)}"></div>'
 
         html = f"""<!DOCTYPE html>
 <html>
@@ -117,17 +118,17 @@ class EmailReporter:
     <table style="width:100%;border-collapse:collapse;">
       <tr>
         <td style="padding:12px;background:#f9fafb;border-radius:8px;text-align:center;width:33%;">
-          <div style="font-size:24px;font-weight:700;color:#6366f1;">{stats.get('total_pageviews', 0):,}</div>
+          <div style="font-size:24px;font-weight:700;color:#6366f1;">{stats.get("total_pageviews", 0):,}</div>
           <div style="font-size:12px;color:#6b7280;">Pageviews</div>
         </td>
         <td style="width:16px;"></td>
         <td style="padding:12px;background:#f9fafb;border-radius:8px;text-align:center;width:33%;">
-          <div style="font-size:24px;font-weight:700;color:#6366f1;">{visitor_stats.get('total_visitors', 0):,}</div>
+          <div style="font-size:24px;font-weight:700;color:#6366f1;">{visitor_stats.get("total_visitors", 0):,}</div>
           <div style="font-size:12px;color:#6b7280;">Visitors</div>
         </td>
         <td style="width:16px;"></td>
         <td style="padding:12px;background:#f9fafb;border-radius:8px;text-align:center;width:33%;">
-          <div style="font-size:24px;font-weight:700;color:#6366f1;">{stats.get('total_sessions', 0):,}</div>
+          <div style="font-size:24px;font-weight:700;color:#6366f1;">{stats.get("total_sessions", 0):,}</div>
           <div style="font-size:12px;color:#6b7280;">Sessions</div>
         </td>
       </tr>
@@ -136,17 +137,17 @@ class EmailReporter:
     <table style="width:100%;border-collapse:collapse;margin-top:16px;">
       <tr>
         <td style="padding:12px;background:#f9fafb;border-radius:8px;text-align:center;width:33%;">
-          <div style="font-size:20px;font-weight:700;color:#10b981;">{stats.get('avg_session_seconds', 0):.0f}s</div>
+          <div style="font-size:20px;font-weight:700;color:#10b981;">{stats.get("avg_session_seconds", 0):.0f}s</div>
           <div style="font-size:12px;color:#6b7280;">Avg Session</div>
         </td>
         <td style="width:16px;"></td>
         <td style="padding:12px;background:#f9fafb;border-radius:8px;text-align:center;width:33%;">
-          <div style="font-size:20px;font-weight:700;color:#f59e0b;">{stats.get('bounce_rate', 0):.1f}%</div>
+          <div style="font-size:20px;font-weight:700;color:#f59e0b;">{stats.get("bounce_rate", 0):.1f}%</div>
           <div style="font-size:12px;color:#6b7280;">Bounce Rate</div>
         </td>
         <td style="width:16px;"></td>
         <td style="padding:12px;background:#f9fafb;border-radius:8px;text-align:center;width:33%;">
-          <div style="font-size:20px;font-weight:700;color:#8b5cf6;">{visitor_stats.get('return_rate', 0):.1f}%</div>
+          <div style="font-size:20px;font-weight:700;color:#8b5cf6;">{visitor_stats.get("return_rate", 0):.1f}%</div>
           <div style="font-size:12px;color:#6b7280;">Return Rate</div>
         </td>
       </tr>
