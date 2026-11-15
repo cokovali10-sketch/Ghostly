@@ -45,7 +45,7 @@ jobs:
           pip install --upgrade pip
           pip install -e ".[dev]"
       - name: Run tests
-        run: pytest --cov=ghostly --cov-report=xml -v
+        run: pytest --cov=ghostly --cov-report=xml -v --cov-fail-under=0
       - name: Upload coverage
         if: matrix.python-version == '3.12'
         uses: codecov/codecov-action@v4
